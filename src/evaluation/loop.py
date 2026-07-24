@@ -35,6 +35,7 @@ from content_parser.two_phase import generate_block, generate_outline
 from evaluation.evaluate import evaluate_deck
 from generator.generator import generate
 from generator.slide_kit import content_text_shapes
+from llm_clients.backends import GIGACHAT_MODELS
 from matcher.matcher import plan_from_outline
 from rendering.render import render_pptx_to_pngs
 from template_parser.parser import extract_template
@@ -164,15 +165,31 @@ def _synth_canvas_hints(source_pptx, plan, profile):
         return {}
 
 
+def _gen_models(model):
+    """Primary model with GigaChat-2-Max as a safety net. A weak tier (base
+    GigaChat-2) intermittently returns a block that fails strict validation;
+    forcing models=[model] left call_with_model_fallback no fallback, so one bad
+    stats_kpi block raised ValueError and crashed the ENTIRE iteration (real, on
+    `--model auto` hitting GigaChat-2). The net only engages for the specific
+    blocks the primary can't produce validly, so the deck stays essentially
+    `model`'s. Only added for GigaChat tiers — a non-GigaChat client (RTX) can't
+    serve a GigaChat model name."""
+    if model in GIGACHAT_MODELS and model != "GigaChat-2-Max":
+        return [model, "GigaChat-2-Max"]
+    return [model]
+
+
 def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_pptx, profile=None):
-    """Two-phase generation under a single model. Returns (plan, skipped) where
-    plan is [(block, slide_idx)] — its order is the final slide order."""
-    outline = generate_outline(client, brief, spec, models=[model], style_preamble=style_preamble)
+    """Two-phase generation under one model (with a validation-failure safety net,
+    see _gen_models). Returns (plan, skipped) — plan is [(block, slide_idx)], its
+    order is the final slide order."""
+    models = _gen_models(model)
+    outline = generate_outline(client, brief, spec, models=models, style_preamble=style_preamble)
     assignments, skipped_items = plan_from_outline(outline, spec)
     plan = []
     for item, slide_idx, final_count in assignments:
         block = generate_block(client, item["role"], item["theme"], brief,
-                               count=final_count, models=[model], style_preamble=style_preamble)
+                               count=final_count, models=models, style_preamble=style_preamble)
         plan.append((block, slide_idx))
     synth_canvas = _synth_canvas_hints(source_pptx, plan, profile)
     generate(source_pptx, plan, out_pptx, synth_canvas=synth_canvas)

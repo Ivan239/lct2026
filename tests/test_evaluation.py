@@ -123,6 +123,17 @@ def test_distinct_slides_not_flagged_as_duplicates(tmp_path):
     assert scores["dop_no_dup_slides"]["score"] == 5
 
 
+def test_gen_models_adds_max_safety_net():
+    """A weak tier that returns an invalid block must fall back to GigaChat-2-Max
+    instead of crashing the iteration — but only for GigaChat models (a non-
+    GigaChat client can't serve a GigaChat name)."""
+    from evaluation.loop import _gen_models
+    assert _gen_models("GigaChat-2") == ["GigaChat-2", "GigaChat-2-Max"]
+    assert _gen_models("GigaChat-3-Ultra") == ["GigaChat-3-Ultra", "GigaChat-2-Max"]
+    assert _gen_models("GigaChat-2-Max") == ["GigaChat-2-Max"]  # no self-duplicate
+    assert _gen_models("rtx") == ["rtx"]                        # non-GigaChat: unchanged
+
+
 def _slide_png(path, bg, ink):
     """A synthetic 'slide': a solid bg with a big block of ink 'text' — enough
     to exercise the dominant-ink contrast logic without LibreOffice."""
