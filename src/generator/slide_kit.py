@@ -13,6 +13,7 @@ Everything here carries hard-won invariants; see CLAUDE.md before touching:
 import copy
 
 from pptx.enum.shapes import PP_PLACEHOLDER
+from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches
 
 _RELS_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
@@ -91,6 +92,27 @@ def clone_slide(prs, source_idx):
             rid_map[rid] = clone.part.rels.get_or_add_ext_rel(rel.reltype, rel.target_ref)
         else:
             rid_map[rid] = clone.part.relate_to(rel.target_part, rel.reltype)
+
+    # The slide-level background <p:bg> lives in <p:cSld>, a SIBLING of the shape
+    # tree — copying shapes alone drops it, so a cloned slide whose template used
+    # a <p:bg> solid/gradient fill (not a full-bleed PICTURE) falls through to the
+    # master's white background. That left synthesized-canvas and reused-slide
+    # clones unreadable (light template text on white — the contrast backstop
+    # caught it on the loop's own decks). Copy <p:bg> across, remapping any rels
+    # it carries (a blipFill picture background references an image rel).
+    src_cSld = source._element.find(qn("p:cSld"))
+    src_bg = src_cSld.find(qn("p:bg")) if src_cSld is not None else None
+    if src_bg is not None:
+        bg = copy.deepcopy(src_bg)
+        for node in bg.iter():
+            for key, value in node.attrib.items():
+                if key.startswith("{%s}" % _RELS_NS) and value in rid_map:
+                    node.set(key, rid_map[value])
+        clone_cSld = clone._element.find(qn("p:cSld"))
+        existing = clone_cSld.find(qn("p:bg"))
+        if existing is not None:
+            clone_cSld.remove(existing)
+        clone_cSld.insert(0, bg)  # schema: <p:bg> must precede <p:spTree>
 
     for shape in source.shapes:
         element = copy.deepcopy(shape._element)

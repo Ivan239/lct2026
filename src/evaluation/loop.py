@@ -16,8 +16,11 @@ import re
 import time
 
 from pptx import Presentation
+from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.util import Inches
 
 from common.pictures import has_oversized_picture
+from common.synthesis import SYNTHESIZE
 from design_system.extractor import _describe_slide, build_archetype_map
 from design_system.fingerprint_cache import FingerprintCache
 from design_system.style_card import (
@@ -27,10 +30,11 @@ from design_system.style_card import (
     load_card,
     save_card,
 )
-from design_system.style_profile import build_measured_profile
+from design_system.style_profile import build_measured_profile, rotation_targets
 from content_parser.two_phase import generate_block, generate_outline
 from evaluation.evaluate import evaluate_deck
 from generator.generator import generate
+from generator.slide_kit import content_text_shapes
 from matcher.matcher import plan_from_outline
 from rendering.render import render_pptx_to_pngs
 from template_parser.parser import extract_template
@@ -109,6 +113,7 @@ def ensure_template(client, model, source_pptx, source_name, out_root=LOOP_ROOT,
         "workdir": workdir,
         "archetype_map": archetype_map,
         "spec": spec,
+        "profile": profile,
         "style_preamble": style_preamble,
         "png_paths": png_paths,
         "meta": meta,
@@ -116,7 +121,50 @@ def ensure_template(client, model, source_pptx, source_name, out_root=LOOP_ROOT,
     }
 
 
-def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_pptx):
+def _synth_canvas_hints(source_pptx, plan, profile):
+    """{plan_position: template_slide_idx} for SYNTHESIZE positions — mirrors the
+    API's _synth_canvas_hints so the headless loop doesn't draw synthesized
+    slides on a blank white page. Without this the synth path leaves light
+    template text on the master's white background — unreadable (the defect the
+    contrast backstop kept flagging on the loop's own decks, slide 5/6). Canvas =
+    a furniture-only template slide (<=3 content boxes), preferring the colour
+    the rotation wants at that position."""
+    if not profile:
+        return {}
+    try:
+        targets = rotation_targets(profile, len(plan))
+        prs = Presentation(source_pptx)
+        photo_limit = Inches(1.2)
+        candidates = []
+        for idx in range(len(prs.slides)):
+            if idx in profile["breathers"]:
+                continue
+            slide = prs.slides[idx]
+            has_photo = any(
+                s.shape_type == MSO_SHAPE_TYPE.PICTURE and s.width and s.width > photo_limit
+                and not (s.width >= prs.slide_width * 0.9)
+                for s in slide.shapes
+            )
+            if has_photo:
+                continue
+            candidates.append((len(content_text_shapes(slide)), idx, profile["backgrounds"].get(idx)))
+        if not candidates:
+            return {}
+        eligible = [c for c in candidates if c[0] <= 3] or sorted(candidates)[:3]
+        hints = {}
+        for position, (_, slide_idx) in enumerate(plan):
+            if slide_idx != SYNTHESIZE:
+                continue
+            target = targets[position] if targets else None
+            best = min(eligible, key=lambda c: (0 if target is not None and c[2] == target else 1, c[0], c[1]))
+            hints[position] = best[1]
+        return hints
+    except Exception as e:  # noqa: BLE001 — best-effort, falls back to from-scratch
+        print(f"[loop synth_canvas] {e}", flush=True)
+        return {}
+
+
+def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_pptx, profile=None):
     """Two-phase generation under a single model. Returns (plan, skipped) where
     plan is [(block, slide_idx)] — its order is the final slide order."""
     outline = generate_outline(client, brief, spec, models=[model], style_preamble=style_preamble)
@@ -126,7 +174,8 @@ def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_p
         block = generate_block(client, item["role"], item["theme"], brief,
                                count=final_count, models=[model], style_preamble=style_preamble)
         plan.append((block, slide_idx))
-    generate(source_pptx, plan, out_pptx)
+    synth_canvas = _synth_canvas_hints(source_pptx, plan, profile)
+    generate(source_pptx, plan, out_pptx, synth_canvas=synth_canvas)
     skipped = [{"type": it["role"], "title": it.get("theme")} for it in skipped_items]
     return plan, skipped
 
@@ -145,7 +194,7 @@ def run_iteration(client, model, source_pptx, brief, source_name=None,
     ts = int(time.time())
     out_pptx = os.path.join(t["workdir"], "decks", f"deck_{ts}.pptx")
     plan, skipped = generate_deck(client, model, source_pptx, t["spec"], brief,
-                                  t["style_preamble"], out_pptx)
+                                  t["style_preamble"], out_pptx, profile=t["profile"])
     slide_roles = {pos: block["type"] for pos, (block, _) in enumerate(plan)}
 
     result = evaluate_deck(out_pptx, brief, client=judge_client or client,
