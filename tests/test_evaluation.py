@@ -123,6 +123,38 @@ def test_distinct_slides_not_flagged_as_duplicates(tmp_path):
     assert scores["dop_no_dup_slides"]["score"] == 5
 
 
+def _slide_png(path, bg, ink):
+    """A synthetic 'slide': a solid bg with a big block of ink 'text' — enough
+    to exercise the dominant-ink contrast logic without LibreOffice."""
+    from PIL import Image, ImageDraw
+
+    img = Image.new("RGB", (960, 540), bg)
+    d = ImageDraw.Draw(img)
+    for i in range(6):  # several fat bars = a substantial ink block
+        d.rectangle([120, 120 + i * 40, 840, 145 + i * 40], fill=ink)
+    img.save(path)
+    return str(path)
+
+
+def test_contrast_flags_light_ink_on_white(tmp_path):
+    from evaluation import contrast
+
+    # Same brand ink (orange), different background — exactly the real defect:
+    # the deck's palette is designed for navy and washes out on a white breather.
+    good = _slide_png(tmp_path / "navy.png", (16, 32, 64), (240, 128, 32))     # orange on navy ~6:1
+    bad = _slide_png(tmp_path / "white.png", (240, 240, 240), (240, 128, 32))  # orange on white ~2.4:1
+    res = contrast.evaluate_contrast([good, bad])
+    assert res["low_contrast_slides"] == [1]  # only the grey-on-white slide
+    assert res["per_slide"][0] > contrast.LOW_CONTRAST_RATIO
+    assert res["per_slide"][1] < contrast.LOW_CONTRAST_RATIO
+
+
+def test_contrast_ratio_matches_wcag_black_white():
+    from evaluation import contrast
+    # black vs white is the canonical 21:1
+    assert round(contrast.contrast_ratio((0, 0, 0), (255, 255, 255)), 1) == 21.0
+
+
 def test_out_of_bounds_box_flagged(tmp_path):
     path = _deck(tmp_path, [("Ок", ["a"])])
     prs = Presentation(path)

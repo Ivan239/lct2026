@@ -13,7 +13,7 @@ import time
 
 from pptx import Presentation
 
-from evaluation import deterministic, judge, rubric
+from evaluation import contrast, deterministic, judge, rubric
 from rendering.render import render_pptx_to_pngs
 
 EVAL_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "output", "evaluations")
@@ -42,6 +42,7 @@ def evaluate_deck(pptx_path, brief, client=None, slide_roles=None,
     scores = {}
     scores.update(deterministic.evaluate(pptx_path, slide_roles=slide_roles))
 
+    png_paths = None
     judged = {}
     if client is not None:
         png_paths = render_pptx_to_pngs(pptx_path, render_dir)
@@ -62,6 +63,27 @@ def evaluate_deck(pptx_path, brief, client=None, slide_roles=None,
         judged = judge.judge(client, png_paths, brief, slide_texts, **kw)
         scores.update(judged)
 
+    # Contrast backstop (zero-token, from the render): downgrade readability (1.1)
+    # when the deck's ink washes out on a slide's background — the light-grey-on-
+    # white breather defect the eye catches but font/overflow math and the judge
+    # miss. Only lowers 1.1, never raises it.
+    if png_paths:
+        cres = contrast.evaluate_contrast(png_paths)
+        low = cres["low_contrast_slides"]
+        if low:
+            frac = len(low) / len(png_paths)
+            cscore = max(1, min(5, round(5 - 4 * frac)))
+            cur = scores.get("1.1", {}).get("score")
+            if cur is None or cscore < cur:
+                scores["1.1"] = {
+                    "score": cscore,
+                    "detail": f"низкий контраст текст/фон на слайдах {[i + 1 for i in low]}"
+                              + (f"; {scores['1.1']['detail']}" if scores.get('1.1', {}).get('detail') else ""),
+                }
+        result_contrast = cres
+    else:
+        result_contrast = None
+
     # criteria never scored (no client, or judge fully failed) -> N/A, excluded
     # from the weighted total rather than dragging it to zero.
     for cid in rubric.CRITERIA:
@@ -80,6 +102,7 @@ def evaluate_deck(pptx_path, brief, client=None, slide_roles=None,
             for cid in rubric.CRITERIA
         },
         "llm_evaluated": bool(judged and any(v["score"] is not None for v in judged.values())),
+        "contrast": result_contrast,
     }
 
     out_json = out_json or os.path.join(EVAL_DIR, f"{result['label']}_{result['timestamp']}.json")
