@@ -25,6 +25,7 @@ load_dotenv()
 from evaluation.evaluate import format_report
 from evaluation.loop import run_iteration
 from llm_clients import backends
+from rendering.render import render_pptx_to_pngs
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DEFAULT_SOURCE = os.path.join(BASE, "output", "templates", "template_a_corporate.pptx")
@@ -96,6 +97,18 @@ def main():
     print(f"\nSlides: {result['n_slides']}  Skipped: {len(result['skipped'])}")
     print(f"Deck:   {result['deck']}")
     print(f"Eval:   {ev['_json_path']}")
+
+    # Render to a stable folder and flag it LOUDLY: the numbers and GigaChat both
+    # missed a white-bg/gray-text contrast disaster on iteration #1 that the eye
+    # caught instantly. In the loop, the strongest judge is Claude itself looking
+    # at these — so make them impossible to skip.
+    look_dir = os.path.join(os.path.dirname(result["deck"]),
+                            f"look_{os.path.splitext(os.path.basename(result['deck']))[0]}")
+    os.makedirs(look_dir, exist_ok=True)
+    look_pngs = render_pptx_to_pngs(result["deck"], look_dir)
+    print("\n>>> ПОСМОТРИ ГЛАЗАМИ на каждый слайд (Read), это ПЕРВИЧНАЯ визуальная оценка:")
+    for p in look_pngs:
+        print("    " + p)
 
     if args.out_json:
         slim = {k: v for k, v in result.items() if k != "evaluation"}
