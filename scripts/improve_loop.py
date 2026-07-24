@@ -29,6 +29,26 @@ from llm_clients import backends
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DEFAULT_SOURCE = os.path.join(BASE, "output", "templates", "template_a_corporate.pptx")
 
+# Rotated across iterations for diversification (the judge stays fixed on
+# GigaChat vision regardless). Max first — it's the verified flagship.
+ROTATION = ["GigaChat-2-Max", "GigaChat-2-Pro", "GigaChat-2", "GigaChat-3-Ultra"]
+STATE_FILE = os.path.join(BASE, ".loop_state.json")
+
+
+def _next_model():
+    """Pick the next rotation model and advance the counter (state file is
+    gitignored so it never pollutes the safety-net commits)."""
+    i = 0
+    if os.path.exists(STATE_FILE):
+        try:
+            i = json.load(open(STATE_FILE)).get("i", 0)
+        except Exception:
+            i = 0
+    model = ROTATION[i % len(ROTATION)]
+    with open(STATE_FILE, "w") as f:
+        json.dump({"i": (i + 1) % len(ROTATION)}, f)
+    return model
+
 # A canonical brief that exercises the whole rubric: a clear task, a named
 # audience and tone (for prompt-adherence/adaptation criteria), and a
 # problem->solution->metrics->outcome arc (for structure/logic/completeness).
@@ -46,7 +66,8 @@ CANONICAL_BRIEF = (
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", default="GigaChat-2-Max")
+    ap.add_argument("--model", default="GigaChat-2-Max",
+                    help="model name, or 'auto' to rotate through ROTATION")
     ap.add_argument("--source", default=DEFAULT_SOURCE)
     ap.add_argument("--brief-file", default=None)
     ap.add_argument("--out-json", default=None, help="also write the result bundle here")
@@ -57,10 +78,11 @@ def main():
         with open(args.brief_file, encoding="utf-8") as f:
             brief = f.read().strip()
 
+    requested = _next_model() if args.model == "auto" else args.model
     try:
-        gen_client, model_name = backends.resolve(args.model)
+        gen_client, model_name = backends.resolve(requested)
     except backends.BackendUnavailable as e:
-        print(f"[loop] модель {args.model} в очереди: {e}")
+        print(f"[loop] модель {requested} в очереди: {e}")
         return
     judge = backends.judge_client()
     print(f"[loop] model={model_name} source={os.path.basename(args.source)} "
