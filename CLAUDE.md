@@ -8,6 +8,14 @@ AI-генератор презентаций (хакатон, 2 мес, комм
 
 - Backend: `.venv/bin/uvicorn src.api.main:app --app-dir . --port 8000` (без --reload — после правок перезапускать).
 - Frontend: `cd frontend && npm run dev` (Vite, порт 5173).
+- Оценка + цикл улучшения: `.venv/bin/python3 scripts/improve_loop.py --model auto`
+  (генерит деку по каноническому брифу, оценивает по рубрике, пишет JSON в
+  `output/evaluations/`). Рубрика — `docs/evaluation_rubric.md`; харнесс —
+  `src/evaluation/` (rubric-веса + детерминированные гео/типографика-проверки без
+  токенов + судья GigaChat vision/text, разбитый на чанки с валидацией полноты);
+  бэкенды моделей — `src/llm_clients/backends.py` (судья ВСЕГДА независимый GigaChat
+  vision; RTX = обучающая видеокарта, в очереди, не инференс-бэкенд). Отчёты
+  итераций — `docs/improvement_runs/`.
 - Тесты: `.venv/bin/python3 -m pytest tests/ -q` — быстрые, без LLM и без LibreOffice; гоняй после каждого изменения генератора/кластеризации.
 - Рендер для проверки: `src/rendering/render.py::render_pptx_to_pngs` (LibreOffice + pdftoppm; отсутствующие шрифты подменяются на Arial только в превью-копии).
 
