@@ -1,0 +1,48 @@
+@use '@/shared/styles/variables' as v;
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: v.$space-2;
+  height: 48px;
+  padding: 0 v.$space-5;
+  border-radius: v.$radius-md;
+  border: none;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease;
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  &:not(:disabled):hover {
+    transform: translateY(-1px);
+  }
+}
+
+.primary {
+  background: v.$color-orange;
+  color: v.$color-navy;
+  box-shadow: v.$shadow-sm;
+
+  &:not(:disabled):hover {
+    box-shadow: v.$shadow-md;
+  }
+}
+
+.secondary {
+  background: transparent;
+  color: v.$color-navy;
+  border: 1px solid v.$color-border;
+
+  &:not(:disabled):hover {
+    border-color: v.$color-navy;
+  }
+}

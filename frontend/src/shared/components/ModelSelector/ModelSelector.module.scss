@@ -1,0 +1,29 @@
+@use '@/shared/styles/variables' as v;
+
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: v.$space-2;
+}
+
+.label {
+  font-size: 13px;
+  color: v.$color-text-muted;
+  white-space: nowrap;
+}
+
+.select {
+  height: 36px;
+  padding: 0 v.$space-2;
+  border-radius: v.$radius-sm;
+  border: 1px solid v.$color-border;
+  background: v.$color-surface;
+  font-size: 13px;
+  color: v.$color-text;
+  cursor: pointer;
+
+  &:focus {
+    outline: none;
+    border-color: v.$color-orange;
+  }
+}

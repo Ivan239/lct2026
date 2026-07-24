@@ -1,0 +1,20 @@
+@use '@/shared/styles/variables' as v;
+
+.textarea {
+  width: 100%;
+  min-height: 280px;
+  padding: v.$space-3;
+  border: 1px solid v.$color-border;
+  border-radius: v.$radius-md;
+  font-family: v.$font-sans;
+  font-size: 14px;
+  line-height: 1.6;
+  color: v.$color-text;
+  resize: vertical;
+  background: v.$color-surface;
+
+  &:focus {
+    outline: none;
+    border-color: v.$color-orange;
+  }
+}

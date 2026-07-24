@@ -1,0 +1,11 @@
+requests
+python-dotenv
+python-pptx
+lxml
+Pillow
+fastapi
+uvicorn[standard]
+python-multipart
+fonttools
+defusedxml
+xmlschema

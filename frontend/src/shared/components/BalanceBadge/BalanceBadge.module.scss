@@ -1,0 +1,30 @@
+@use '@/shared/styles/variables' as v;
+
+.wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: v.$space-3;
+  padding: v.$space-2 v.$space-3;
+  border-radius: v.$radius-sm;
+  background: v.$color-bg;
+  border: 1px solid v.$color-border;
+  font-size: 12px;
+  color: v.$color-text-muted;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: v.$color-success;
+  flex-shrink: 0;
+}
+
+.entry {
+  white-space: nowrap;
+
+  strong {
+    color: v.$color-text;
+  }
+}

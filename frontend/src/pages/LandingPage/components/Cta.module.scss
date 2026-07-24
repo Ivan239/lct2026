@@ -1,0 +1,24 @@
+@use '@/shared/styles/variables' as v;
+
+.section {
+  padding: v.$space-7 0 v.$space-8;
+}
+
+.box {
+  background: v.$color-navy;
+  border-radius: v.$radius-lg;
+  padding: v.$space-6;
+  text-align: center;
+  color: v.$color-surface;
+
+  h2 {
+    font-size: 26px;
+    margin-bottom: v.$space-3;
+  }
+
+  p {
+    color: rgba(255, 255, 255, 0.75);
+    margin-bottom: v.$space-4;
+    font-size: 16px;
+  }
+}

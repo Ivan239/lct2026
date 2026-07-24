@@ -1,0 +1,66 @@
+@use '@/shared/styles/variables' as v;
+
+.section {
+  padding: v.$space-7 0;
+  border-top: 1px solid v.$color-border;
+}
+
+.heading {
+  font-size: 28px;
+  color: v.$color-navy;
+  margin-bottom: v.$space-5;
+}
+
+.steps {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: v.$space-4;
+
+  @media (max-width: v.$breakpoint-md) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.step {
+  h3 {
+    color: v.$color-navy;
+    font-size: 17px;
+    margin: v.$space-3 0 v.$space-2;
+  }
+
+  p {
+    color: v.$color-text-muted;
+    font-size: 14px;
+    line-height: 1.55;
+  }
+}
+
+.stepHeader {
+  display: flex;
+  align-items: center;
+}
+
+.number {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: v.$color-navy;
+  color: v.$color-orange;
+  font-weight: 700;
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.connector {
+  flex: 1;
+  height: 2px;
+  background: v.$color-border;
+  margin-left: v.$space-2;
+
+  @media (max-width: v.$breakpoint-md) {
+    display: none;
+  }
+}

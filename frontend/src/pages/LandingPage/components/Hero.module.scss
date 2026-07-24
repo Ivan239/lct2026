@@ -1,0 +1,39 @@
+@use '@/shared/styles/variables' as v;
+
+.hero {
+  padding: v.$space-8 0 v.$space-7;
+  max-width: 720px;
+}
+
+.eyebrow {
+  color: v.$color-orange;
+  font-weight: 600;
+  font-size: 14px;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  margin-bottom: v.$space-3;
+}
+
+.title {
+  font-size: 44px;
+  line-height: 1.15;
+  color: v.$color-navy;
+  font-weight: 700;
+  margin-bottom: v.$space-4;
+
+  @media (max-width: v.$breakpoint-md) {
+    font-size: 32px;
+  }
+}
+
+.subtitle {
+  font-size: 18px;
+  line-height: 1.6;
+  color: v.$color-text-muted;
+  margin-bottom: v.$space-5;
+}
+
+.actions {
+  display: flex;
+  gap: v.$space-3;
+}

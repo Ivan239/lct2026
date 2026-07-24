@@ -1,0 +1,27 @@
+@use '@/shared/styles/variables' as v;
+
+.wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: v.$space-2;
+}
+
+.spinner {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid v.$color-border;
+  border-top-color: v.$color-orange;
+  animation: spin 0.7s linear infinite;
+}
+
+.label {
+  color: v.$color-text-muted;
+  font-size: 14px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

@@ -1,0 +1,41 @@
+@use '@/shared/styles/variables' as v;
+
+.section {
+  padding: v.$space-7 0;
+  border-top: 1px solid v.$color-border;
+}
+
+.heading {
+  font-size: 28px;
+  color: v.$color-navy;
+  margin-bottom: v.$space-5;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: v.$space-4;
+
+  @media (max-width: v.$breakpoint-md) {
+    grid-template-columns: 1fr;
+  }
+}
+
+.card {
+  background: v.$color-surface;
+  border: 1px solid v.$color-border;
+  border-radius: v.$radius-md;
+  padding: v.$space-4;
+
+  h3 {
+    color: v.$color-navy;
+    font-size: 17px;
+    margin-bottom: v.$space-2;
+  }
+
+  p {
+    color: v.$color-text-muted;
+    font-size: 15px;
+    line-height: 1.55;
+  }
+}

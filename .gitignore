@@ -1,0 +1,11 @@
+.env
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.DS_Store
+output/
+node_modules/
+frontend/dist/
+.loop_state.json

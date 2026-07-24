@@ -1,0 +1,63 @@
+@use '@/shared/styles/variables' as v;
+
+.section {
+  padding: v.$space-7 0;
+  border-top: 1px solid v.$color-border;
+}
+
+.heading {
+  font-size: 28px;
+  color: v.$color-navy;
+  margin-bottom: v.$space-5;
+}
+
+.table {
+  border: 1px solid v.$color-border;
+  border-radius: v.$radius-md;
+  overflow: hidden;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: 140px 1fr 1fr;
+
+  &:not(:last-child) {
+    border-bottom: 1px solid v.$color-border;
+  }
+
+  @media (max-width: v.$breakpoint-md) {
+    grid-template-columns: 100px 1fr 1fr;
+  }
+}
+
+.cellLabel,
+.cellOurs,
+.cellOthers,
+.cellHeadOurs,
+.cellHeadOthers {
+  padding: v.$space-3;
+  font-size: 14px;
+}
+
+.cellLabel {
+  color: v.$color-text-muted;
+  font-weight: 600;
+  background: v.$color-bg;
+}
+
+.cellHeadOurs,
+.cellHeadOthers {
+  font-weight: 700;
+  color: v.$color-navy;
+  background: v.$color-bg;
+}
+
+.cellOurs {
+  color: v.$color-text;
+  background: rgba(240, 140, 40, 0.06);
+  border-left: 2px solid v.$color-orange;
+}
+
+.cellOthers {
+  color: v.$color-text-muted;
+}

@@ -1,0 +1,8 @@
+@use '@/shared/styles/variables' as v;
+
+.container {
+  width: 100%;
+  max-width: v.$container-width;
+  margin: 0 auto;
+  padding: 0 v.$space-4;
+}

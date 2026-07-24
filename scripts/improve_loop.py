@@ -1,0 +1,88 @@
+"""One improvement-loop iteration, headless.
+
+    .venv/bin/python3 scripts/improve_loop.py [--model GigaChat-2-Max]
+                                              [--source output/templates/<file>.pptx]
+                                              [--brief-file path.txt]
+
+Picks a model, ensures a template parsed by that model exists, generates a deck
+from a canonical brief, scores it against docs/evaluation_rubric.md, and prints
+the report + the paths. The detailed improvement PLAN and any code changes are
+authored by whoever reads this output (a human, or the agent on a scheduled
+fire) — this script's job is to produce the reproducible evaluation to plan from.
+"""
+
+import argparse
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from dotenv import load_dotenv
+
+load_dotenv()
+
+from evaluation.evaluate import format_report
+from evaluation.loop import run_iteration
+from llm_clients import backends
+
+BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+DEFAULT_SOURCE = os.path.join(BASE, "output", "templates", "template_a_corporate.pptx")
+
+# A canonical brief that exercises the whole rubric: a clear task, a named
+# audience and tone (for prompt-adherence/adaptation criteria), and a
+# problem->solution->metrics->outcome arc (for structure/logic/completeness).
+CANONICAL_BRIEF = (
+    "Продукт: облачная платформа «Поток» для аналитики продаж среднего бизнеса. "
+    "Задача презентации: убедить коммерческого директора внедрить платформу. "
+    "Аудитория: коммерческие директора и руководители отделов продаж. "
+    "Тон: деловой, без хайпа, с опорой на цифры. "
+    "Нужно раскрыть: проблему разрозненных данных о продажах; как «Поток» их "
+    "объединяет; ключевые возможности (единый дашборд, прогноз спроса, "
+    "автоотчёты); измеримые результаты внедрения (рост конверсии, экономия "
+    "времени, точность прогноза); и завершающий слайд с призывом к пилоту."
+)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--model", default="GigaChat-2-Max")
+    ap.add_argument("--source", default=DEFAULT_SOURCE)
+    ap.add_argument("--brief-file", default=None)
+    ap.add_argument("--out-json", default=None, help="also write the result bundle here")
+    args = ap.parse_args()
+
+    brief = CANONICAL_BRIEF
+    if args.brief_file:
+        with open(args.brief_file, encoding="utf-8") as f:
+            brief = f.read().strip()
+
+    try:
+        gen_client, model_name = backends.resolve(args.model)
+    except backends.BackendUnavailable as e:
+        print(f"[loop] модель {args.model} в очереди: {e}")
+        return
+    judge = backends.judge_client()
+    print(f"[loop] model={model_name} source={os.path.basename(args.source)} "
+          f"judge=GigaChat(vision)", flush=True)
+    result = run_iteration(gen_client, model_name, args.source, brief,
+                           source_name=os.path.splitext(os.path.basename(args.source))[0],
+                           judge_client=judge)
+
+    ev = result["evaluation"]
+    print("\n" + format_report(ev))
+    print(f"\nSlides: {result['n_slides']}  Skipped: {len(result['skipped'])}")
+    print(f"Deck:   {result['deck']}")
+    print(f"Eval:   {ev['_json_path']}")
+
+    if args.out_json:
+        slim = {k: v for k, v in result.items() if k != "evaluation"}
+        slim["total_100"] = ev["total_100"]
+        slim["eval_json"] = ev["_json_path"]
+        with open(args.out_json, "w", encoding="utf-8") as f:
+            json.dump(slim, f, ensure_ascii=False, indent=2)
+        print(f"Bundle: {args.out_json}")
+
+
+if __name__ == "__main__":
+    main()

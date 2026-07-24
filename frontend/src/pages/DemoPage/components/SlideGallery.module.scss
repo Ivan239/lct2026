@@ -1,0 +1,14 @@
+@use '@/shared/styles/variables' as v;
+
+.gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: v.$space-3;
+}
+
+.slide {
+  width: 100%;
+  border: 1px solid v.$color-border;
+  border-radius: v.$radius-sm;
+  box-shadow: v.$shadow-sm;
+}

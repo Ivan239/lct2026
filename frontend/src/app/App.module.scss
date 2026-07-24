@@ -1,0 +1,58 @@
+@use '@/shared/styles/variables' as v;
+
+.header {
+  border-bottom: 1px solid v.$color-border;
+  background: v.$color-surface;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.headerInner {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.logo {
+  font-size: 20px;
+  font-weight: 700;
+  color: v.$color-navy;
+  text-decoration: none;
+
+  span {
+    color: v.$color-orange;
+  }
+}
+
+.nav {
+  display: flex;
+  gap: v.$space-5;
+}
+
+.navLink,
+.navLinkActive {
+  text-decoration: none;
+  font-weight: 500;
+  font-size: 15px;
+  color: v.$color-text-muted;
+  padding-bottom: 4px;
+  border-bottom: 2px solid transparent;
+}
+
+.navLinkActive {
+  color: v.$color-navy;
+  border-bottom-color: v.$color-orange;
+}
+
+.main {
+  flex: 1;
+}
+
+.footer {
+  border-top: 1px solid v.$color-border;
+  padding: v.$space-4 0;
+  color: v.$color-text-muted;
+  font-size: 13px;
+}
