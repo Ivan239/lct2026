@@ -123,6 +123,50 @@ def test_distinct_slides_not_flagged_as_duplicates(tmp_path):
     assert scores["dop_no_dup_slides"]["score"] == 5
 
 
+def test_unavailable_ids_selects_only_judge_failures():
+    from evaluation.judge import JUDGE_UNAVAILABLE, _unavailable_ids
+    scores = {
+        "a": {"score": 4, "detail": "ok"},                                # scored
+        "b": {"score": None, "detail": "неприменимо: в деке нет медиа"},  # inapplicable N/A
+        "c": {"score": None, "detail": f"{JUDGE_UNAVAILABLE}: ConnectionError"},  # judge failure
+        "d": {"score": None, "detail": f"{JUDGE_UNAVAILABLE}: Timeout"},          # judge failure
+    }
+    assert _unavailable_ids(scores, ["a", "b", "c", "d"]) == ["c", "d"]
+
+
+def test_judge_recovers_transient_failure(monkeypatch):
+    """A transient tunnel drop that N/A's one chunk on the first pass must be
+    recovered by the second pass — not left permanently N/A (a real run lost 6
+    criteria to a momentary ConnectionError)."""
+    import json as _json
+    import requests
+    from evaluation import judge as J
+    from evaluation.judge import JUDGE_UNAVAILABLE
+
+    monkeypatch.setattr("common.model_fallback.NETWORK_RETRY_DELAY_SECONDS", 0)
+    payload = _json.dumps({cid: {"score": 4, "note": "ok"} for cid in J.VISUAL_IDS + J.CONTENT_IDS})
+
+    class Flaky:
+        def __init__(self):
+            self.calls = 0
+
+        def upload_file(self, path, purpose="general"):
+            return {"id": "img"}
+
+        def chat(self, messages, model=None, **kw):
+            self.calls += 1
+            if self.calls <= 5:  # exhaust the first single-model chunk's retries
+                raise requests.exceptions.ConnectionError("tunnel drop")
+            return {"choices": [{"message": {"content": payload}}]}
+
+    scores = J.judge(Flaky(), ["a.png"], "brief", ["s1", "s2"],
+                     vision_models=["M"], text_models=["M"])
+    still_failed = [c for c, v in scores.items()
+                    if v["score"] is None and str(v["detail"]).startswith(JUDGE_UNAVAILABLE)]
+    assert still_failed == [], f"recovery left criteria unavailable: {still_failed}"
+    assert scores["1.2"]["score"] == 4  # first (failed) visual chunk recovered
+
+
 def test_gen_models_adds_max_safety_net():
     """A weak tier that returns an invalid block must fall back to GigaChat-2-Max
     instead of crashing the iteration — but only for GigaChat models (a non-

@@ -150,6 +150,9 @@ def _chunks(ids, size=CHUNK):
         yield ids[i:i + size]
 
 
+JUDGE_UNAVAILABLE = "судья недоступен"  # prefix marking an N/A caused by a judge FAILURE (not inapplicability)
+
+
 def _judge_group(build_call, ids, models):
     """Score `ids` in reliable-sized chunks. A failing chunk degrades only its
     own ids to N/A — the rest of the deck still gets a real score."""
@@ -159,9 +162,17 @@ def _judge_group(build_call, ids, models):
             raw = call_with_model_fallback(build_call(chunk), models)
             out.update(_coerce(raw, chunk))
         except Exception as e:  # noqa: BLE001 — a flaky judge must not kill the loop
-            out.update({cid: {"score": None, "detail": f"судья недоступен: {type(e).__name__}"}
+            out.update({cid: {"score": None, "detail": f"{JUDGE_UNAVAILABLE}: {type(e).__name__}"}
                         for cid in chunk})
     return out
+
+
+def _unavailable_ids(scores, ids):
+    """Of `ids`, those left N/A specifically by a judge FAILURE (transient network
+    drop), not by inapplicability — the ones worth a second attempt."""
+    return [c for c in ids
+            if scores.get(c, {}).get("score") is None
+            and str(scores.get(c, {}).get("detail", "")).startswith(JUDGE_UNAVAILABLE)]
 
 
 def judge_visual(client, image_ids, brief, models=VISION_MODELS, ids=None):
@@ -240,11 +251,23 @@ def judge(client, image_paths, brief, slide_texts, skip_ids=None,
     too often to be trusted with that call."""
     skip = set(skip_ids or [])
     image_ids = [_upload_with_retry(client, p) for p in image_paths]
+    vis_ids = [i for i in VISUAL_IDS if i not in skip]
+    con_ids = [i for i in CONTENT_IDS if i not in skip]
     scores = {}
-    scores.update(judge_visual(client, image_ids, brief, models=vision_models,
-                               ids=[i for i in VISUAL_IDS if i not in skip]))
-    scores.update(judge_content(client, brief, slide_texts, models=text_models,
-                                ids=[i for i in CONTENT_IDS if i not in skip]))
+    scores.update(judge_visual(client, image_ids, brief, models=vision_models, ids=vis_ids))
+    scores.update(judge_content(client, brief, slide_texts, models=text_models, ids=con_ids))
+
+    # A transient tunnel drop during ONE chunk N/A'd its whole chunk — a real run
+    # lost 6 criteria (a full visual chunk) to a momentary ConnectionError. By now
+    # the other chunks are done and the blip has almost certainly passed, so give
+    # the judge-FAILED criteria (not the inapplicable ones) a single second pass.
+    retry_vis = _unavailable_ids(scores, vis_ids)
+    retry_con = _unavailable_ids(scores, con_ids)
+    if retry_vis:
+        scores.update(judge_visual(client, image_ids, brief, models=vision_models, ids=retry_vis))
+    if retry_con:
+        scores.update(judge_content(client, brief, slide_texts, models=text_models, ids=retry_con))
+
     for cid in skip:
         scores[cid] = {"score": None, "detail": "неприменимо: в деке нет такого медиа"}
     return scores
