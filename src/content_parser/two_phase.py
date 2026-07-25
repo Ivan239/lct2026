@@ -184,6 +184,19 @@ def _first_sentence(text):
     return text
 
 
+def _guard_widow(text):
+    """Glue a bullet's last two words with a non-breaking space so a wrap can't
+    strand the final word alone on its own line — the «сирота»/widow the eye
+    catches on narrow two-column bullets («…принятия / решений»). Only for >=3
+    words, so line 1 always keeps at least one word even if the glued pair wraps.
+    No-op on text that has no space to replace. U+00A0 renders identically to a
+    space and is honoured as non-breaking by LibreOffice/PowerPoint."""
+    words = text.split()
+    if len(words) < 3:
+        return text
+    return " ".join(words[:-1]) + " " + words[-1]
+
+
 def _enforce_text_budgets(block, role):
     title = str(block.get("title") or "")
     if len(title.split()) > MAX_TITLE_WORDS:
@@ -199,7 +212,7 @@ def _enforce_text_budgets(block, role):
                 if len(item) > MAX_BULLET_CHARS:
                     cut = item[:MAX_BULLET_CHARS].rsplit(" ", 1)[0]
                     item = cut.rstrip(".,;: ")
-                trimmed.append(item)
+                trimmed.append(_guard_widow(item))
             block[field] = trimmed
     return block
 

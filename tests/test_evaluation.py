@@ -123,6 +123,36 @@ def test_distinct_slides_not_flagged_as_duplicates(tmp_path):
     assert scores["dop_no_dup_slides"]["score"] == 5
 
 
+def test_guard_widow_glues_last_two_words():
+    from content_parser.two_phase import _guard_widow
+    assert _guard_widow("Рост точности принятия решений") == "Рост точности принятия решений"
+    assert _guard_widow("Быстрая автоматизация") == "Быстрая автоматизация"  # 2 words untouched
+    assert _guard_widow("Итог") == "Итог"
+
+
+def test_tokens_nbsp_aware_is_noop_without_nbsp():
+    from evaluation.deterministic import _tokens
+    assert _tokens("a b c") == ["a", "b", "c"]           # identical to .split()
+    assert _tokens("one  two\tthree") == ["one", "two", "three"]
+    assert _tokens("aa bb cc") == ["aa", "bb cc"]  # NBSP keeps the pair
+
+
+def test_is_widow_respects_nbsp_glue():
+    """A lone last word is a widow; the same words glued with NBSP are one token
+    (two visible words) and must NOT be flagged."""
+    from evaluation.deterministic import _is_widow
+
+    class _FakeMetrics:
+        def text_width_pt(self, s, size_pt):
+            return len(s) * 10.0
+
+    m = _FakeMetrics()
+    plain_widow, _ = _is_widow("aa bb cc dd", 1.4, 18, m, 0)
+    glued_ok, _ = _is_widow("aa bb cc dd", 1.4, 18, m, 0)
+    assert plain_widow is True
+    assert glued_ok is False
+
+
 def test_unavailable_ids_selects_only_judge_failures():
     from evaluation.judge import JUDGE_UNAVAILABLE, _unavailable_ids
     scores = {

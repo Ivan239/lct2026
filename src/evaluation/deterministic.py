@@ -133,19 +133,32 @@ def _overflows(shape, metrics_for):
     return est > usable_h_in * OVERFLOW_TOLERANCE
 
 
+NBSP = " "
+
+
+def _tokens(raw):
+    """Split into wrap tokens on breakable whitespace only — a non-breaking space
+    (U+00A0) keeps its two words as ONE token, matching how the renderer wraps
+    text glued by the widow guard (two_phase._guard_widow). No-op for text with
+    no NBSP, so every existing deck tokenises exactly as raw.split() did."""
+    return [t for t in re.split(r"[^\S ]+", raw) if t]
+
+
 def _wrap_words(text, width_in, size_pt, metrics, margins_in):
-    """Greedy word-wrap into visual lines (list of word-lists), matching the
-    algorithm in text_fit._wrapped_lines_metric. Used to spot orphan last lines."""
+    """Greedy word-wrap into visual lines (list of token-lists), matching the
+    renderer. Used to spot orphan last lines."""
     budget_pt = max(1.0, (width_in - (margins_in or 0)) * 72)
     space_pt = metrics.text_width_pt(" ", size_pt)
     lines = []
     for raw in text.split("\n"):
-        words = raw.split()
+        words = _tokens(raw)
         if not words:
             continue
         cur, cur_w = [], 0.0
         for w in words:
-            ww = metrics.text_width_pt(w, size_pt)
+            # NBSP renders as a space width; measure it as one so the glued
+            # token's width is right even if the font lacks a U+00A0 glyph.
+            ww = metrics.text_width_pt(w.replace(NBSP, " "), size_pt)
             step = ww if not cur else space_pt + ww
             if cur and cur_w + step > budget_pt:
                 lines.append((cur, cur_w))
@@ -162,12 +175,14 @@ def _is_widow(text, width_in, size_pt, metrics, margins_in):
     """A widow/orphan is a wrapped paragraph whose LAST line is a single short
     word — a lone word using less than WIDOW_MAX_FRACTION of the line is what
     reads as a dangling straggler; one long word filling most of its line is
-    just a normal wrap, not a defect."""
+    just a normal wrap, not a defect. A single token that is itself an NBSP-glued
+    pair is TWO visible words, so it isn't a widow."""
     budget_pt, lines = _wrap_words(text, width_in, size_pt, metrics, margins_in)
     if len(lines) < 2:
         return False, len(lines)
     last_words, last_w = lines[-1]
-    return (len(last_words) == 1 and last_w < WIDOW_MAX_FRACTION * budget_pt), len(lines)
+    lone = len(last_words) == 1 and NBSP not in last_words[0]
+    return (lone and last_w < WIDOW_MAX_FRACTION * budget_pt), len(lines)
 
 
 def evaluate(pptx_path, slide_roles=None):
