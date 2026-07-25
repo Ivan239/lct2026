@@ -28,7 +28,7 @@ from generator.text_fit import (
     horizontal_margins_in,
     vertical_insets_emu,
 )
-from qa.geometry import _is_content_shape
+from qa.geometry import SPARSE_EXEMPT_ROLES, _is_content_shape
 from template_parser.parser import extract_theme
 
 OVERFLOW_TOLERANCE = 1.05          # same slack qa/geometry uses before "it overflows"
@@ -347,13 +347,21 @@ def evaluate(pptx_path, slide_roles=None):
         "score": _rate_to_score((of + walls) / (n or 1)),
         "detail": f"{of} переполнений + {walls} стен текста как признак плохого разбиения",
     }
-    # dop_distribution / dop_pacing — evenness of per-slide char counts / shapes
-    char_counts = [p["chars"] for p in per_slide if p["chars"] > 0]
-    scores["dop_distribution"] = _evenness_score(char_counts, "символов")
-    shape_counts = [p["n_content"] for p in per_slide if p["n_content"] > 0]
-    scores["dop_pacing"] = _evenness_score(
-        [c + s * 40 for c, s in zip(char_counts, shape_counts)] or char_counts, "объёма"
-    )
+    # dop_distribution / dop_pacing — evenness across CONTENT slides only. Title,
+    # divider and closing are sparse BY DESIGN (a divider is one phrase); counting
+    # them as "uneven" punishes a deck for having structure — the same reason
+    # qa.geometry.find_sparse_slides exempts these roles. Without roles, fall back
+    # to all slides. (Also: char/shape counts are now read from the SAME slides,
+    # not filtered independently and zipped — that could misalign the pairs.)
+    if slide_roles:
+        content_slides = [p for i, p in enumerate(per_slide)
+                          if slide_roles.get(i) not in SPARSE_EXEMPT_ROLES]
+    else:
+        content_slides = per_slide
+    char_counts = [p["chars"] for p in content_slides if p["chars"] > 0]
+    scores["dop_distribution"] = _evenness_score(char_counts, "символов контентных слайдов")
+    paced = [p["chars"] + p["n_content"] * 40 for p in content_slides if p["chars"] > 0]
+    scores["dop_pacing"] = _evenness_score(paced or char_counts, "объёма контентных слайдов")
     # 6.3 completeness
     if slide_roles:
         last_role = slide_roles.get(n - 1)

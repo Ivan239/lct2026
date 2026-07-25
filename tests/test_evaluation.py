@@ -123,6 +123,22 @@ def test_distinct_slides_not_flagged_as_duplicates(tmp_path):
     assert scores["dop_no_dup_slides"]["score"] == 5
 
 
+def test_pacing_excludes_structural_sparse_slides(tmp_path):
+    """A sparse divider is sparse BY DESIGN — it must not drag down the
+    distribution/pacing evenness of the content slides."""
+    body = ["строка текста здесь " * 4]
+    path = _deck(tmp_path, [
+        ("Слайд один", body),
+        ("Слайд два", body),
+        ("Раздел", ["итог"]),      # tiny divider
+        ("Слайд три", body),
+    ])
+    without = deterministic.evaluate(path)["dop_distribution"]["score"]
+    with_roles = deterministic.evaluate(
+        path, slide_roles={2: "section_divider"})["dop_distribution"]["score"]
+    assert with_roles > without  # excluding the sparse divider lifts even-content score
+
+
 def test_guard_widow_glues_last_two_words():
     from content_parser.two_phase import _guard_widow
     assert _guard_widow("Рост точности принятия решений") == "Рост точности принятия решений"
