@@ -146,6 +146,17 @@ def test_guard_widow_glues_last_two_words():
     assert _guard_widow("Итог") == "Итог"
 
 
+def test_enforce_budgets_guards_stat_labels():
+    from content_parser.two_phase import _enforce_text_budgets
+    block = {"type": "stats_kpi", "title": "Итоги",
+             "stats": [["+25%", "Рост конверсии продаж"], ["95%", "Точность"]]}
+    out = _enforce_text_budgets(block, "stats_kpi")
+    assert out["stats"][0][0] == "+25%"                                    # number untouched
+    assert " " in out["stats"][0][1]                                  # last two words glued
+    assert out["stats"][0][1].replace(" ", " ") == "Рост конверсии продаж"
+    assert out["stats"][1][1] == "Точность" and " " not in out["stats"][1][1]  # 1 word untouched
+
+
 def test_tokens_nbsp_aware_is_noop_without_nbsp():
     from evaluation.deterministic import _tokens
     assert _tokens("a b c") == ["a", "b", "c"]           # identical to .split()

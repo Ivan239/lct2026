@@ -214,6 +214,15 @@ def _enforce_text_budgets(block, role):
                     item = cut.rstrip(".,;: ")
                 trimmed.append(_guard_widow(item))
             block[field] = trimmed
+    # stats_kpi labels widow too (narrow KPI columns): «Экономия времени на /
+    # отчёты». Guard the LABEL (pair[1]); never touch the number (pair[0]).
+    stats = block.get("stats")
+    if isinstance(stats, list):
+        block["stats"] = [
+            [pair[0], _guard_widow(str(pair[1]))]
+            if isinstance(pair, (list, tuple)) and len(pair) == 2 else pair
+            for pair in stats
+        ]
     return block
 
 
