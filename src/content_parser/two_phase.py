@@ -21,7 +21,7 @@ from template_spec.builder import describe_for_prompt
 
 OUTLINE_ROLES = [
     "title", "section_divider", "bullet_list", "stats_kpi",
-    "two_column_comparison", "closing",
+    "two_column_comparison", "image_caption", "closing",
 ]
 
 MAX_SECTION_DIVIDERS = 1
@@ -39,7 +39,9 @@ __MENU__
   подбирай под доступные ёмкости из списка выше; для остальных ролей — null)
 
 Первый блок — всегда role="title". Завершай блоком role="closing", если брифу
-подходит финал с призывом к действию.
+подходит финал с призывом к действию. Где визуал усилит слайд (обзор продукта,
+процесс, результат), добавь 1 блок role="image_caption" — под него зарезервируется
+место под иллюстрацию.
 
 Ответь ТОЛЬКО валидным JSON-массивом, без пояснений и markdown:
 [{"role": "...", "theme": "...", "count": 3}, ...]
@@ -62,6 +64,10 @@ __BRIEF__
     "section_divider": """Напиши заголовок слайда-перехода между разделами презентации.
 Тема раздела: __THEME__
 Ответь ТОЛЬКО валидным JSON: {"title": "короткая фраза, 1-4 слова"}""",
+    "image_caption": """Слайд с иллюстрацией. Картинка ПОКА не генерируется — нужно
+только описать, что на ней должно быть, чтобы зарезервировать место в композиции.
+Тема слайда: __THEME__
+Ответь ТОЛЬКО валидным JSON: {"title": "заголовок слайда, до 7 слов", "image": "что изобразить, 3-8 слов"}""",
     "closing": """Напиши контент финального слайда презентации.
 Тема: __THEME__
 Ответь ТОЛЬКО валидным JSON: {"title": "финальная фраза/призыв, до 6 слов", "subtitle": "подпись, до 10 слов"}""",
@@ -165,6 +171,9 @@ def _validate_block(block, role, count):
     elif role == "two_column_comparison":
         if len(block.get("left_points", [])) != count or len(block.get("right_points", [])) != count:
             raise ValueError("column point counts don't match")
+    elif role == "image_caption":
+        if not str(block.get("image", "")).strip():
+            raise ValueError("image_caption needs an 'image' description")
     return block
 
 

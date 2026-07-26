@@ -291,6 +291,56 @@ def synthesize_two_column_comparison(prs, theme, bounds_in, data, resolver=None,
     return idx
 
 
+IMAGE_PLACEHOLDER_NAME = "img_placeholder"
+
+
+def _add_image_placeholder(slide, left, top, width, height, caption, t):
+    """A dashed frame with a caption — a SKELETON marking where a generated image
+    will go. Images aren't generated yet (plan: skeleton first, for composition);
+    this reserves the space so layout and image PLACEMENT can be judged. Named
+    IMAGE_PLACEHOLDER_NAME so the evaluator can find placeholders on the slide."""
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import MSO_ANCHOR
+    from pptx.oxml.ns import qn
+
+    shp = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, left, top, width, height)
+    shp.name = IMAGE_PLACEHOLDER_NAME
+    shp.shadow.inherit = False
+    shp.fill.background()  # transparent — a frame, not a filled box
+    shp.line.color.rgb = _hex_to_rgb(t["accent"]) or RGBColor(0x88, 0x88, 0x88)
+    shp.line.width = Pt(1.5)
+    ln = shp.line._get_or_add_ln()  # dashed border reads as "reserved / to-be-filled"
+    ln.append(ln.makeelement(qn("a:prstDash"), {"val": "dash"}))
+
+    tf = shp.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    tf.text = "ИЗОБРАЖЕНИЕ"
+    _style_paragraph(tf.paragraphs[0], t["minor_font"], 12, t["accent"], bold=True)
+    tf.paragraphs[0].alignment = PP_ALIGN.CENTER
+    cap = tf.add_paragraph()
+    cap.text = str(caption)
+    _style_paragraph(cap, t["minor_font"], 14, t["text"])
+    cap.alignment = PP_ALIGN.CENTER
+    return shp
+
+
+def synthesize_image_caption(prs, theme, bounds_in, data, resolver=None, canvas_idx=None):
+    slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx)
+    title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"], resolver=resolver)
+    # Reserve at least a two-line title's worth of clearance: the frame is large,
+    # so any overlap with a title that wrapped to a second line is glaring (the
+    # estimate can under-count lines — renderer wraps ~2-4% earlier). max() below
+    # keeps the frame clear even when title_box.height only budgeted one line.
+    clearance = max(int(title_box.height), int(Inches(1.3))) + int(Inches(0.35))
+    top = Emu(int(title_box.top) + clearance)
+    width = Emu(b["right"] - b["left"])
+    height = Emu(max(int(Inches(1.6)), int(b["bottom"]) - int(top)))
+    caption = data.get("image") or data.get("caption") or "иллюстрация по теме слайда"
+    _add_image_placeholder(slide, b["left"], top, width, height, caption, t)
+    return idx
+
+
 SYNTHESIZERS = {
     "title": synthesize_title,
     "section_divider": synthesize_title,
@@ -298,4 +348,5 @@ SYNTHESIZERS = {
     "bullet_list": synthesize_bullet_list,
     "stats_kpi": synthesize_stats_kpi,
     "two_column_comparison": synthesize_two_column_comparison,
+    "image_caption": synthesize_image_caption,
 }

@@ -49,13 +49,21 @@ def evaluate_deck(pptx_path, brief, client=None, slide_roles=None,
         slide_texts = _slide_texts(pptx_path)
         # Force image/infographics criteria to N/A when the deck has no such
         # media — deterministic, so it can't drift with the judge's mood.
+        # Image PLACEHOLDERS (skeleton frames) are the exception: there's no real
+        # picture to judge for QUALITY (4.2) or STYLE consistency (dop_image_style),
+        # but the image's PLACEMENT, size and relevance-to-theme (4.1/4.3/4.4/4.5)
+        # ARE real and get judged — that's the whole point of the skeletons.
         media = deterministic.deck_media(pptx_path)
+        has_pictures = media["substantive_pictures"] > 0
+        has_placeholders = media.get("placeholders", 0) > 0
         skip = set()
-        if media["substantive_pictures"] == 0:
+        if not has_pictures and not has_placeholders:
             skip |= {"4.1", "4.2", "4.3", "4.4", "4.5", "dop_image_style"}
+        elif has_placeholders and not has_pictures:
+            skip |= {"4.2", "dop_image_style"}  # no real image yet: no quality/style to score
         if media["charts"] == 0:
             skip |= {"7.1", "7.2", "7.3"}
-        kw = {"skip_ids": skip}
+        kw = {"skip_ids": skip, "media": media}
         if vision_models:
             kw["vision_models"] = vision_models
         if text_models:

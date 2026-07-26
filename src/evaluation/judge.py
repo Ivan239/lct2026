@@ -175,7 +175,7 @@ def _unavailable_ids(scores, ids):
             and str(scores.get(c, {}).get("detail", "")).startswith(JUDGE_UNAVAILABLE)]
 
 
-def judge_visual(client, image_ids, brief, models=VISION_MODELS, ids=None):
+def judge_visual(client, image_ids, brief, models=VISION_MODELS, ids=None, context=""):
     ids = VISUAL_IDS if ids is None else ids
 
     def build(chunk):
@@ -183,7 +183,7 @@ def judge_visual(client, image_ids, brief, models=VISION_MODELS, ids=None):
             f"Ты строгий дизайн-ревьюер презентаций. К сообщению прикреплены {len(image_ids)} "
             "слайдов сгенерированной презентации по порядку.\n"
             f"Бриф, по которому её делали:\n{brief}\n\n"
-            f"{_SCALE}\nОцени визуальные критерии (смотри на слайды):\n"
+            f"{context}{_SCALE}\nОцени визуальные критерии (смотри на слайды):\n"
             f"{_criteria_block(chunk)}\n\n{_out_spec(chunk)}"
         )
 
@@ -240,7 +240,7 @@ def _upload_with_retry(client, path, attempts=4):
     raise last
 
 
-def judge(client, image_paths, brief, slide_texts, skip_ids=None,
+def judge(client, image_paths, brief, slide_texts, skip_ids=None, media=None,
           vision_models=VISION_MODELS, text_models=TEXT_MODELS):
     """Full LLM pass. Uploads images once, runs both groups, returns
     {criterion_id: {"score": 1..5|None, "detail": str}} for every llm criterion.
@@ -248,13 +248,23 @@ def judge(client, image_paths, brief, slide_texts, skip_ids=None,
     skip_ids: criteria the deck doesn't exercise (e.g. image criteria on a
     text-only deck). They're forced to N/A and never sent to the model — the
     rubric says N/A is 'неприменимо', and the judge scores 'no images' as a 1
-    too often to be trusted with that call."""
+    too often to be trusted with that call.
+    media: deck_media() result — used to tell the vision judge when 'images' are
+    skeleton PLACEHOLDERS (dashed frames with a caption), so it scores their
+    PLACEMENT/size/relevance, not a photo that isn't there yet."""
     skip = set(skip_ids or [])
+    context = ""
+    if media and media.get("placeholders", 0) > 0 and media.get("substantive_pictures", 0) == 0:
+        context = (
+            "ВАЖНО: изображения на слайдах — это СКЕЛЕТЫ-ЗАГЛУШКИ (пунктирная рамка с "
+            "подписью, что там будет), картинки ещё не сгенерированы. Оценивай РАСПОЛОЖЕНИЕ, "
+            "размер и уместность этих областей в композиции, а не качество картинки.\n"
+        )
     image_ids = [_upload_with_retry(client, p) for p in image_paths]
     vis_ids = [i for i in VISUAL_IDS if i not in skip]
     con_ids = [i for i in CONTENT_IDS if i not in skip]
     scores = {}
-    scores.update(judge_visual(client, image_ids, brief, models=vision_models, ids=vis_ids))
+    scores.update(judge_visual(client, image_ids, brief, models=vision_models, ids=vis_ids, context=context))
     scores.update(judge_content(client, brief, slide_texts, models=text_models, ids=con_ids))
 
     # A transient tunnel drop during ONE chunk N/A'd its whole chunk — a real run
@@ -264,7 +274,7 @@ def judge(client, image_paths, brief, slide_texts, skip_ids=None,
     retry_vis = _unavailable_ids(scores, vis_ids)
     retry_con = _unavailable_ids(scores, con_ids)
     if retry_vis:
-        scores.update(judge_visual(client, image_ids, brief, models=vision_models, ids=retry_vis))
+        scores.update(judge_visual(client, image_ids, brief, models=vision_models, ids=retry_vis, context=context))
     if retry_con:
         scores.update(judge_content(client, brief, slide_texts, models=text_models, ids=retry_con))
 

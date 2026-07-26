@@ -87,6 +87,25 @@ def test_overlong_title_flagged(tmp_path):
     assert scores["2.1"]["score"] < 5
 
 
+def test_deck_media_counts_image_placeholders(tmp_path):
+    """Image skeletons (named frames) are counted so the evaluator scores image
+    PLACEMENT even though there's no real picture yet."""
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.util import Inches
+
+    from generator.synthesizer import IMAGE_PLACEHOLDER_NAME
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    shp = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, Inches(1), Inches(1), Inches(6), Inches(3))
+    shp.name = IMAGE_PLACEHOLDER_NAME
+    path = str(tmp_path / "ph.pptx")
+    prs.save(path)
+    media = deterministic.deck_media(path)
+    assert media["placeholders"] == 1
+    assert media["substantive_pictures"] == 0
+
+
 def test_text_only_deck_has_no_substantive_media(tmp_path):
     """The image-criteria N/A gate rests on this: a text deck reports zero
     substantive pictures and zero charts, so section 4/7 get forced to N/A

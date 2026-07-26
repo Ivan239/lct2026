@@ -50,20 +50,29 @@ def deck_media(pptx_path):
     criteria can be forced to N/A when there's nothing to judge, instead of
     trusting the model (which scores 'no images' as 1 about half the time).
     Bullet-marker icons are excluded by the area threshold: they're not the
-    'изображения' the rubric's section 4 is about."""
+    'изображения' the rubric's section 4 is about.
+
+    Also counts image PLACEHOLDERS (dashed skeleton frames the generator draws
+    where an image will go): a deck with placeholders has no real picture yet,
+    but its image PLACEMENT/composition is real and should be scored."""
     from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    from generator.synthesizer import IMAGE_PLACEHOLDER_NAME
 
     prs = Presentation(pptx_path)
     area = (prs.slide_width or 1) * (prs.slide_height or 1)
-    pictures = charts = 0
+    pictures = charts = placeholders = 0
     for slide in prs.slides:
         for s in slide.shapes:
+            if s.name == IMAGE_PLACEHOLDER_NAME:
+                placeholders += 1
+                continue
             if getattr(s, "has_chart", False):
                 charts += 1
             if s.shape_type == MSO_SHAPE_TYPE.PICTURE:
                 if (s.width or 0) * (s.height or 0) / area > SUBSTANTIVE_PICTURE_FRACTION:
                     pictures += 1
-    return {"substantive_pictures": pictures, "charts": charts}
+    return {"substantive_pictures": pictures, "charts": charts, "placeholders": placeholders}
 
 
 def _rate_to_score(rate):

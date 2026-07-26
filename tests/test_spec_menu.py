@@ -15,6 +15,6 @@ def test_menu_filtered_to_offered_roles():
     menu = describe_for_prompt(SPEC, SYNTHESIZABLE_TYPES)
     assert "bullet_list: 2 слайд(ов)" in menu
     assert "ёмкость пунктов: 4, 8" in menu
-    assert "image_caption" not in menu  # validator would reject it — don't bait the model
+    assert "image_caption: 1 слайд(ов)" in menu  # now an offered role (skeleton frames)
     assert "можно создать с нуля" in menu
     assert "closing" in menu  # offered but not native -> synthesizable
