@@ -23,7 +23,7 @@ from common.model_fallback import TEXT_MODELS
 from common.pictures import has_oversized_picture
 from common.synthesis import SYNTHESIZE
 from content_parser.parser import RESIZE_FIELD_BY_TYPE, parse_brief, resize_block
-from content_parser.two_phase import generate_block, generate_outline
+from content_parser.two_phase import generate_block, generate_outline, stat_fingerprints
 from design_system.extractor import build_archetype_map
 from design_system.fingerprint_cache import FingerprintCache
 from design_system.extractor import _describe_slide
@@ -430,10 +430,17 @@ def _plan_two_phase(template_id, brief, model=None):
         assignments, skipped_items = plan_from_outline(outline, spec)
 
         plan = []
+        # Carry the stat numbers/labels already placed: blocks are separate calls
+        # and otherwise repeat the same KPIs on two slides (seen on real decks).
+        used_nums, used_labels = set(), set()
         for i, (item, slide_idx, final_count) in enumerate(assignments):
             _set_progress(f"Пишем контент: {item['theme']}", done=i, total=len(assignments))
             block = generate_block(client, item["role"], item["theme"], brief, count=final_count,
-                                   models=models, style_preamble=style_preamble)
+                                   models=models, style_preamble=style_preamble,
+                                   used_stats=(used_nums, used_labels))
+            nums, labels = stat_fingerprints(block)
+            used_nums |= nums
+            used_labels |= labels
             plan.append((block, slide_idx))
 
         skipped = [{"type": item["role"], "title": item.get("theme")} for item in skipped_items]

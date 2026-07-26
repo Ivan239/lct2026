@@ -31,7 +31,7 @@ from design_system.style_card import (
     save_card,
 )
 from design_system.style_profile import build_measured_profile, rotation_targets
-from content_parser.two_phase import generate_block, generate_outline
+from content_parser.two_phase import generate_block, generate_outline, stat_fingerprints
 from evaluation.evaluate import evaluate_deck
 from generator.generator import generate
 from generator.slide_kit import content_text_shapes
@@ -191,9 +191,16 @@ def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_p
     outline = generate_outline(client, brief, spec, models=models, style_preamble=style_preamble)
     assignments, skipped_items = plan_from_outline(outline, spec)
     plan = []
+    # Blocks are generated one call at a time and can't see each other — carry the
+    # stat numbers/labels already placed so a later stat slide can't repeat them.
+    used_nums, used_labels = set(), set()
     for item, slide_idx, final_count in assignments:
         block = generate_block(client, item["role"], item["theme"], brief,
-                               count=final_count, models=models, style_preamble=style_preamble)
+                               count=final_count, models=models, style_preamble=style_preamble,
+                               used_stats=(used_nums, used_labels))
+        nums, labels = stat_fingerprints(block)
+        used_nums |= nums
+        used_labels |= labels
         plan.append((block, slide_idx))
     synth_canvas = _synth_canvas_hints(source_pptx, plan, profile)
     generate(source_pptx, plan, out_pptx, synth_canvas=synth_canvas)

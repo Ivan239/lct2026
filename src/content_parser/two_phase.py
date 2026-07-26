@@ -13,6 +13,7 @@ actually deliver; the old single-shot parse_brief carried four at once and
 statistically dropped some on every run."""
 
 import json
+import re
 
 from common.json_utils import extract_json
 from common.model_fallback import TEXT_MODELS, call_with_model_fallback
@@ -275,23 +276,74 @@ def _enforce_text_budgets(block, role):
     return block
 
 
+def stat_fingerprints(block):
+    """Numbers and labels a stats_kpi block occupies, normalized for comparison.
+    Blocks are generated one call at a time with no knowledge of each other, so
+    two stat slides routinely came out with the SAME numbers — see
+    _reject_duplicate_stats."""
+    nums, labels = set(), set()
+    for pair in block.get("stats", []) or []:
+        if isinstance(pair, (list, tuple)) and len(pair) == 2:
+            num, label = pair
+            if str(num).strip():
+                nums.add(str(num).strip().lower())
+            norm = re.sub(r"\s+", " ", str(label).replace(" ", " ")).strip().lower()
+            if norm:
+                labels.add(norm)
+    return nums, labels
+
+
+def _reject_duplicate_stats(block, role, used_nums, used_labels):
+    """Raise (-> retry) when a stat slide reuses a number or label another slide
+    already showed. Observed on a real deck: slides 5 and 6 both read
+    +25% / -40% / 92% with near-identical labels — visually one slide shown
+    twice. The model can't know this on its own; each block is a separate call."""
+    if role != "stats_kpi":
+        return
+    nums, labels = stat_fingerprints(block)
+    clash = (nums & used_nums) | (labels & used_labels)
+    if clash:
+        raise ValueError(f"stats repeat what another slide already shows: {sorted(clash)}")
+
+
 def generate_block(client, role, theme, brief, count=None, models=TEXT_MODELS,
-                   style_preamble=""):
+                   style_preamble="", used_stats=None):
     """One block, one call, one requirement (the exact count) — sized for the
     already-chosen slide, so nothing needs resizing after the fact.
-    style_preamble: the template design brief (plan 9.4), advisory only."""
+    style_preamble: the template design brief (plan 9.4), advisory only.
+    used_stats: (numbers, labels) already shown on earlier stat slides — asked
+    for in the prompt AND enforced by validation+retry, because asking alone
+    doesn't hold (project rule: hard constraints go in code)."""
     theme_line = f"{theme}\n{style_preamble}" if style_preamble else theme
+    used_nums, used_labels = used_stats or (set(), set())
     prompt = (
         BLOCK_PROMPTS[role]
         .replace("__THEME__", theme_line)
         .replace("__BRIEF__", brief)
         .replace("__COUNT__", str(count or 3))
     )
+    if role == "stats_kpi" and (used_nums or used_labels):
+        prompt += (
+            "\n\nЭТИ цифры и метрики УЖЕ показаны на другом слайде — возьми ДРУГИЕ "
+            "показатели, не повторяй ни числа, ни формулировки:\n"
+            + "; ".join(sorted(used_nums | used_labels))
+        )
 
-    def call(model):
-        result = client.chat([{"role": "user", "content": prompt}], model=model, max_tokens=800)
-        return _validate_block(extract_json(result["choices"][0]["message"]["content"]), role, count or 3)
+    def make_call(enforce_unique):
+        def call(model):
+            result = client.chat([{"role": "user", "content": prompt}], model=model, max_tokens=800)
+            block = _validate_block(extract_json(result["choices"][0]["message"]["content"]),
+                                    role, count or 3)
+            if enforce_unique:
+                _reject_duplicate_stats(block, role, used_nums, used_labels)
+            return block
+        return call
 
-    block = call_with_model_fallback(call, models)
+    try:
+        block = call_with_model_fallback(make_call(True), models)
+    except ValueError:
+        # Couldn't get distinct metrics after the retries: a duplicated stat
+        # slide is a defect, a crashed iteration is worse. Take the block.
+        block = call_with_model_fallback(make_call(False), models)
     block["type"] = role
     return _enforce_text_budgets(block, role)

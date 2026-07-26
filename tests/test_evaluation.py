@@ -328,3 +328,38 @@ def test_apply_claude_scores_partial_leaves_rest_na():
     out = apply_claude_scores(result, {"1.3": (2, "верх плотный, низ пустой")})
     assert out["scores"]["1.3"]["score"] == 2
     assert out["scores"]["1.6"]["score"] is None  # untouched llm criterion stays N/A
+
+
+def test_stat_fingerprints_and_duplicate_rejection():
+    """Two stat slides showing the same numbers read as one slide shown twice
+    (real defect: slides 5/6 both +25% / -40% / 92%). Uniqueness is enforced by
+    validation+retry, not by asking the model nicely."""
+    from content_parser.two_phase import _reject_duplicate_stats, stat_fingerprints
+
+    first = {"stats": [["+25%", "Рост конверсии в сделку"], ["-40%", "Экономия времени"]]}
+    nums, labels = stat_fingerprints(first)
+    assert nums == {"+25%", "-40%"}
+    assert "рост конверсии в сделку" in labels
+
+    # a later slide repeating a NUMBER must be rejected (-> retried)
+    dup_num = {"stats": [["+25%", "Совсем другая метрика"]]}
+    try:
+        _reject_duplicate_stats(dup_num, "stats_kpi", nums, labels)
+        assert False, "duplicate number should have been rejected"
+    except ValueError:
+        pass
+
+    # repeating a LABEL must be rejected too
+    dup_label = {"stats": [["+99%", "Рост конверсии в сделку"]]}
+    try:
+        _reject_duplicate_stats(dup_label, "stats_kpi", nums, labels)
+        assert False, "duplicate label should have been rejected"
+    except ValueError:
+        pass
+
+    # genuinely different metrics pass
+    fresh = {"stats": [["3 дня", "Срок внедрения"]]}
+    _reject_duplicate_stats(fresh, "stats_kpi", nums, labels)
+
+    # non-stat roles are untouched
+    _reject_duplicate_stats({"bullets": ["a"]}, "bullet_list", nums, labels)
