@@ -1,5 +1,5 @@
-"""Evaluation harness — the LLM-free parts (weighting + deterministic checks).
-The vision/content judge needs GigaChat and is exercised manually, not here."""
+"""Evaluation harness — deterministic checks, weighting, and Claude's own
+score-merge step (claude_review). No LLM API is ever called to judge a deck."""
 
 import sys
 import os
@@ -199,50 +199,6 @@ def test_is_widow_respects_nbsp_glue():
     assert glued_ok is False
 
 
-def test_unavailable_ids_selects_only_judge_failures():
-    from evaluation.judge import JUDGE_UNAVAILABLE, _unavailable_ids
-    scores = {
-        "a": {"score": 4, "detail": "ok"},                                # scored
-        "b": {"score": None, "detail": "неприменимо: в деке нет медиа"},  # inapplicable N/A
-        "c": {"score": None, "detail": f"{JUDGE_UNAVAILABLE}: ConnectionError"},  # judge failure
-        "d": {"score": None, "detail": f"{JUDGE_UNAVAILABLE}: Timeout"},          # judge failure
-    }
-    assert _unavailable_ids(scores, ["a", "b", "c", "d"]) == ["c", "d"]
-
-
-def test_judge_recovers_transient_failure(monkeypatch):
-    """A transient tunnel drop that N/A's one chunk on the first pass must be
-    recovered by the second pass — not left permanently N/A (a real run lost 6
-    criteria to a momentary ConnectionError)."""
-    import json as _json
-    import requests
-    from evaluation import judge as J
-    from evaluation.judge import JUDGE_UNAVAILABLE
-
-    monkeypatch.setattr("common.model_fallback.NETWORK_RETRY_DELAY_SECONDS", 0)
-    payload = _json.dumps({cid: {"score": 4, "note": "ok"} for cid in J.VISUAL_IDS + J.CONTENT_IDS})
-
-    class Flaky:
-        def __init__(self):
-            self.calls = 0
-
-        def upload_file(self, path, purpose="general"):
-            return {"id": "img"}
-
-        def chat(self, messages, model=None, **kw):
-            self.calls += 1
-            if self.calls <= 5:  # exhaust the first single-model chunk's retries
-                raise requests.exceptions.ConnectionError("tunnel drop")
-            return {"choices": [{"message": {"content": payload}}]}
-
-    scores = J.judge(Flaky(), ["a.png"], "brief", ["s1", "s2"],
-                     vision_models=["M"], text_models=["M"])
-    still_failed = [c for c, v in scores.items()
-                    if v["score"] is None and str(v["detail"]).startswith(JUDGE_UNAVAILABLE)]
-    assert still_failed == [], f"recovery left criteria unavailable: {still_failed}"
-    assert scores["1.2"]["score"] == 4  # first (failed) visual chunk recovered
-
-
 def test_gen_models_adds_max_safety_net():
     """A weak tier that returns an invalid block must fall back to GigaChat-2-Max
     instead of crashing the iteration — but only for GigaChat models (a non-
@@ -334,3 +290,41 @@ def test_outline_always_gets_one_image_slide():
     full = [{"role": "title", "theme": "t", "count": None}]
     full += [{"role": "bullet_list", "theme": f"b{i}", "count": 3} for i in range(MAX_BLOCKS + 3)]
     assert len(_enforce_outline_rules(full)) <= MAX_BLOCKS
+
+
+def test_apply_claude_scores_recomputes_total():
+    from evaluation.claude_review import apply_claude_scores
+
+    result = {"scores": {cid: {"title": t, "mode": m, "score": None, "detail": "ожидает оценки Клода"}
+                         for cid, (t, m) in rubric.CRITERIA.items()}}
+    # deterministic criteria already scored (as evaluate_deck would leave them)
+    for cid in rubric.CRITERIA:
+        if rubric.CRITERIA[cid][1] == "det":
+            result["scores"][cid]["score"] = 5
+
+    llm_scores = {cid: (5, "ок") for cid, (_, mode) in rubric.CRITERIA.items() if mode == "llm"}
+    out = apply_claude_scores(result, llm_scores)
+    assert out["total_100"] == 100.0
+    assert out["llm_evaluated"] is True
+    assert out["judge"] == "claude"
+
+
+def test_apply_claude_scores_rejects_deterministic_ids():
+    from evaluation.claude_review import apply_claude_scores
+    result = {"scores": {cid: {"title": t, "mode": m, "score": None, "detail": ""}
+                         for cid, (t, m) in rubric.CRITERIA.items()}}
+    det_id = next(cid for cid, (_, mode) in rubric.CRITERIA.items() if mode == "det")
+    try:
+        apply_claude_scores(result, {det_id: (5, "не моя забота")})
+        assert False, "should have rejected a deterministic-mode criterion id"
+    except ValueError:
+        pass
+
+
+def test_apply_claude_scores_partial_leaves_rest_na():
+    from evaluation.claude_review import apply_claude_scores
+    result = {"scores": {cid: {"title": t, "mode": m, "score": None, "detail": "ожидает оценки Клода"}
+                         for cid, (t, m) in rubric.CRITERIA.items()}}
+    out = apply_claude_scores(result, {"1.3": (2, "верх плотный, низ пустой")})
+    assert out["scores"]["1.3"]["score"] == 2
+    assert out["scores"]["1.6"]["score"] is None  # untouched llm criterion stays N/A

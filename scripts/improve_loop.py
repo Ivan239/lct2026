@@ -25,13 +25,13 @@ load_dotenv()
 from evaluation.evaluate import format_report
 from evaluation.loop import run_iteration
 from llm_clients import backends
-from rendering.render import render_pptx_to_pngs
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 DEFAULT_SOURCE = os.path.join(BASE, "output", "templates", "template_a_corporate.pptx")
 
-# Rotated across iterations for diversification (the judge stays fixed on
-# GigaChat vision regardless). Max first — it's the verified flagship.
+# Rotated across iterations for diversification. Max first — it's the verified
+# flagship. No judge model here anymore — Claude scores the LLM-mode criteria
+# by looking at the renders (see evaluation.claude_review), not an API call.
 ROTATION = ["GigaChat-2-Max", "GigaChat-2-Pro", "GigaChat-2", "GigaChat-3-Ultra"]
 STATE_FILE = os.path.join(BASE, ".loop_state.json")
 
@@ -85,12 +85,9 @@ def main():
     except backends.BackendUnavailable as e:
         print(f"[loop] модель {requested} в очереди: {e}")
         return
-    judge = backends.judge_client()
-    print(f"[loop] model={model_name} source={os.path.basename(args.source)} "
-          f"judge=GigaChat(vision)", flush=True)
+    print(f"[loop] model={model_name} source={os.path.basename(args.source)}", flush=True)
     result = run_iteration(gen_client, model_name, args.source, brief,
-                           source_name=os.path.splitext(os.path.basename(args.source))[0],
-                           judge_client=judge)
+                           source_name=os.path.splitext(os.path.basename(args.source))[0])
 
     ev = result["evaluation"]
     print("\n" + format_report(ev))
@@ -98,17 +95,16 @@ def main():
     print(f"Deck:   {result['deck']}")
     print(f"Eval:   {ev['_json_path']}")
 
-    # Render to a stable folder and flag it LOUDLY: the numbers and GigaChat both
-    # missed a white-bg/gray-text contrast disaster on iteration #1 that the eye
-    # caught instantly. In the loop, the strongest judge is Claude itself looking
-    # at these — so make them impossible to skip.
-    look_dir = os.path.join(os.path.dirname(result["deck"]),
-                            f"look_{os.path.splitext(os.path.basename(result['deck']))[0]}")
-    os.makedirs(look_dir, exist_ok=True)
-    look_pngs = render_pptx_to_pngs(result["deck"], look_dir)
-    print("\n>>> ПОСМОТРИ ГЛАЗАМИ на каждый слайд (Read), это ПЕРВИЧНАЯ визуальная оценка:")
-    for p in look_pngs:
+    # No LLM judge is called, ever — GigaChat vision was measured to be a bad
+    # one (scored a duplicate-slides, half-empty deck 90+/100; the user looked
+    # at the same renders and called it 3-4/10). Claude IS the judge: look at
+    # every PNG below, then finalize with scripts/claude_score.py.
+    print("\n>>> ПОСМОТРИ ГЛАЗАМИ на каждый слайд (Read) — ты судья, не число выше:")
+    for p in ev["png_paths"]:
         print("    " + p)
+    print(f"\nПосле просмотра примени свою оценку:")
+    print(f'    .venv/bin/python3 scripts/claude_score.py --eval {ev["_json_path"]} '
+          f'--scores \'{{"1.3": [4, "..."], ...}}\'')
 
     if args.out_json:
         slim = {k: v for k, v in result.items() if k != "evaluation"}

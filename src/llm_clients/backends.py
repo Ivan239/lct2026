@@ -76,13 +76,6 @@ def resolve(model):
     raise BackendUnavailable(f"неизвестный бэкенд для модели {model!r}")
 
 
-def judge_client():
-    """The evaluation judge is fixed to GigaChat vision, independent of whichever
-    model generated the deck — an independent judge, and the only vision backend
-    we have."""
-    return _gigachat()
-
-
 def available(models):
     """Split a candidate model list into (ready, queued) — queued are configured
     but unreachable right now (e.g. RTX offline). Used to report loop status."""

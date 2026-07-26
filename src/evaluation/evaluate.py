@@ -1,10 +1,14 @@
-"""Orchestrator: render a deck, score every rubric criterion (deterministic +
-LLM), compute the weighted 100-point total, and persist the result.
+"""Orchestrator: render a deck, run every DETERMINISTIC rubric check (zero
+tokens), and leave the LLM-mode criteria for Claude to fill in by eye.
 
-This is the "оцениваешь по нашему шаблону" step of the improvement loop. It's the
-one place that knows the deck as a whole — text for the content judge, images for
-the visual judge, geometry for the deterministic checks — so it owns rendering
-and text extraction and hands the pieces to each scorer.
+No LLM API is called here to judge anything. GigaChat vision was tried and
+measured: it scored a deck with duplicate stat slides and half-empty layouts
+90+/100, and it stayed wrong even after several iterations of prompt fixes. The
+user looked at the same renders and called it 3-4/10 on the spot. Claude is the
+harness's judge now — see evaluation.claude_review.apply_claude_scores, which
+merges Claude's own per-criterion scores (assigned after Reading the rendered
+PNGs) into the result this module produces and recomputes the weighted total.
+That merge step is pure arithmetic; still no network call.
 """
 
 import json
@@ -13,10 +17,16 @@ import time
 
 from pptx import Presentation
 
-from evaluation import contrast, deterministic, judge, rubric
+from evaluation import contrast, deterministic, rubric
 from rendering.render import render_pptx_to_pngs
 
 EVAL_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "output", "evaluations")
+
+# Rubric criteria this module can decide are N/A purely from what media the deck
+# contains (deck_media()) — no judgment call, just "is there a picture/chart".
+_NO_MEDIA_AT_ALL = ("4.1", "4.2", "4.3", "4.4", "4.5", "dop_image_style")
+_PLACEHOLDER_ONLY = ("4.2", "dop_image_style")  # skeleton frame: no real image to grade quality/style
+_NO_CHARTS = ("7.1", "7.2", "7.3")
 
 
 def _slide_texts(pptx_path):
@@ -29,12 +39,16 @@ def _slide_texts(pptx_path):
     return texts
 
 
-def evaluate_deck(pptx_path, brief, client=None, slide_roles=None,
-                  render_dir=None, out_json=None, label=None,
-                  vision_models=None, text_models=None):
-    """Score one deck. Without a `client` only the deterministic half runs (still
-    a real partial score, zero tokens) — useful for CI and for validating the
-    harness. Returns the full result dict and writes it to output/evaluations/."""
+def evaluate_deck(pptx_path, brief, slide_roles=None, render_dir=None,
+                  out_json=None, label=None):
+    """Deterministic half of the rubric, always: geometric/typographic checks,
+    render-based contrast, and N/A-gating for image/infographic criteria the
+    deck doesn't even have the media for. Every llm-mode criterion starts as
+    "ожидает оценки Клода" — call claude_review.apply_claude_scores afterward
+    with Claude's own judgment to fill those in and get a real total_100.
+
+    Renders the deck once and records the PNG paths in the result so the caller
+    (and Claude, reviewing them) doesn't need to render a second time."""
     render_dir = render_dir or os.path.join(EVAL_DIR, "_render")
     os.makedirs(render_dir, exist_ok=True)
     os.makedirs(EVAL_DIR, exist_ok=True)
@@ -42,60 +56,42 @@ def evaluate_deck(pptx_path, brief, client=None, slide_roles=None,
     scores = {}
     scores.update(deterministic.evaluate(pptx_path, slide_roles=slide_roles))
 
-    png_paths = None
-    judged = {}
-    if client is not None:
-        png_paths = render_pptx_to_pngs(pptx_path, render_dir)
-        slide_texts = _slide_texts(pptx_path)
-        # Force image/infographics criteria to N/A when the deck has no such
-        # media — deterministic, so it can't drift with the judge's mood.
-        # Image PLACEHOLDERS (skeleton frames) are the exception: there's no real
-        # picture to judge for QUALITY (4.2) or STYLE consistency (dop_image_style),
-        # but the image's PLACEMENT, size and relevance-to-theme (4.1/4.3/4.4/4.5)
-        # ARE real and get judged — that's the whole point of the skeletons.
-        media = deterministic.deck_media(pptx_path)
-        has_pictures = media["substantive_pictures"] > 0
-        has_placeholders = media.get("placeholders", 0) > 0
-        skip = set()
-        if not has_pictures and not has_placeholders:
-            skip |= {"4.1", "4.2", "4.3", "4.4", "4.5", "dop_image_style"}
-        elif has_placeholders and not has_pictures:
-            skip |= {"4.2", "dop_image_style"}  # no real image yet: no quality/style to score
-        if media["charts"] == 0:
-            skip |= {"7.1", "7.2", "7.3"}
-        kw = {"skip_ids": skip, "media": media}
-        if vision_models:
-            kw["vision_models"] = vision_models
-        if text_models:
-            kw["text_models"] = text_models
-        judged = judge.judge(client, png_paths, brief, slide_texts, **kw)
-        scores.update(judged)
+    png_paths = render_pptx_to_pngs(pptx_path, render_dir)
+
+    # Image/infographics N/A-gating — deterministic (deck_media(), not a guess).
+    media = deterministic.deck_media(pptx_path)
+    has_pictures = media["substantive_pictures"] > 0
+    has_placeholders = media.get("placeholders", 0) > 0
+    if not has_pictures and not has_placeholders:
+        for cid in _NO_MEDIA_AT_ALL:
+            scores[cid] = {"score": None, "detail": "неприменимо: в деке нет такого медиа"}
+    elif has_placeholders and not has_pictures:
+        for cid in _PLACEHOLDER_ONLY:
+            scores[cid] = {"score": None, "detail": "неприменимо: изображение ещё не сгенерировано (скелет)"}
+    if media["charts"] == 0:
+        for cid in _NO_CHARTS:
+            scores[cid] = {"score": None, "detail": "неприменимо: в деке нет диаграмм"}
 
     # Contrast backstop (zero-token, from the render): downgrade readability (1.1)
     # when the deck's ink washes out on a slide's background — the light-grey-on-
-    # white breather defect the eye catches but font/overflow math and the judge
-    # miss. Only lowers 1.1, never raises it.
-    if png_paths:
-        cres = contrast.evaluate_contrast(png_paths)
-        low = cres["low_contrast_slides"]
-        if low:
-            frac = len(low) / len(png_paths)
-            cscore = max(1, min(5, round(5 - 4 * frac)))
-            cur = scores.get("1.1", {}).get("score")
-            if cur is None or cscore < cur:
-                scores["1.1"] = {
-                    "score": cscore,
-                    "detail": f"низкий контраст текст/фон на слайдах {[i + 1 for i in low]}"
-                              + (f"; {scores['1.1']['detail']}" if scores.get('1.1', {}).get('detail') else ""),
-                }
-        result_contrast = cres
-    else:
-        result_contrast = None
+    # white breather defect the eye catches but font/overflow math misses. Only
+    # lowers 1.1, never raises it.
+    cres = contrast.evaluate_contrast(png_paths)
+    low = cres["low_contrast_slides"]
+    if low:
+        frac = len(low) / len(png_paths)
+        cscore = max(1, min(5, round(5 - 4 * frac)))
+        cur = scores.get("1.1", {}).get("score")
+        if cur is None or cscore < cur:
+            scores["1.1"] = {
+                "score": cscore,
+                "detail": f"низкий контраст текст/фон на слайдах {[i + 1 for i in low]}"
+                          + (f"; {scores['1.1']['detail']}" if scores.get('1.1', {}).get('detail') else ""),
+            }
 
-    # criteria never scored (no client, or judge fully failed) -> N/A, excluded
-    # from the weighted total rather than dragging it to zero.
+    # Everything else (composition, tone, hallucinations, ...) waits for Claude.
     for cid in rubric.CRITERIA:
-        scores.setdefault(cid, {"score": None, "detail": "не оценивалось"})
+        scores.setdefault(cid, {"score": None, "detail": "ожидает оценки Клода"})
 
     total = rubric.weighted_total(scores)
     result = {
@@ -109,8 +105,11 @@ def evaluate_deck(pptx_path, brief, client=None, slide_roles=None,
             cid: {"title": rubric.CRITERIA[cid][0], "mode": rubric.CRITERIA[cid][1], **scores[cid]}
             for cid in rubric.CRITERIA
         },
-        "llm_evaluated": bool(judged and any(v["score"] is not None for v in judged.values())),
-        "contrast": result_contrast,
+        "llm_evaluated": False,
+        "judge": None,
+        "contrast": cres,
+        "render_dir": os.path.abspath(render_dir),
+        "png_paths": png_paths,
     }
 
     out_json = out_json or os.path.join(EVAL_DIR, f"{result['label']}_{result['timestamp']}.json")
@@ -124,7 +123,8 @@ def format_report(result):
     """Human-readable one-screen summary of an evaluate_deck result."""
     lines = [
         f"# Оценка: {result['label']}",
-        f"Итог: {result['total_100']}/100" + ("" if result["llm_evaluated"] else "  (только детерминированные критерии)"),
+        f"Итог (харнесс): {result['total_100']}/100"
+        + ("" if result["llm_evaluated"] else "  — ТОЛЬКО детерминированные критерии, LLM-часть ждёт оценки Клода"),
         "",
         "## По категориям",
     ]

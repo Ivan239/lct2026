@@ -201,14 +201,15 @@ def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_p
     return plan, skipped
 
 
-def run_iteration(client, model, source_pptx, brief, source_name=None,
-                  out_root=LOOP_ROOT, judge_client=None):
+def run_iteration(client, model, source_pptx, brief, source_name=None, out_root=LOOP_ROOT):
     """Full turn for one model. `client` parses the template and generates the
-    deck (the model under test); `judge_client` scores it — kept separate so the
-    judge stays independent of the generator (defaults to `client` for the
-    single-backend case). Returns a bundle: template info, deck path, the rubric
-    evaluation, and what was skipped. Raises only on a hard failure that leaves
-    no deck to score (the caller records that and moves on)."""
+    deck. Scoring is deterministic-only here (no LLM judge call, ever — Claude
+    reviews the renders and calls evaluation.claude_review.apply_claude_scores
+    separately). Renders straight into the deck's own "look_*" folder so the
+    same PNGs serve both the eval JSON and Claude's visual review — no second
+    render. Returns a bundle: template info, deck path, the rubric evaluation,
+    and what was skipped. Raises only on a hard failure that leaves no deck to
+    score (the caller records that and moves on)."""
     source_name = source_name or os.path.splitext(os.path.basename(source_pptx))[0]
     t = ensure_template(client, model, source_pptx, source_name, out_root=out_root)
 
@@ -218,8 +219,9 @@ def run_iteration(client, model, source_pptx, brief, source_name=None,
                                   t["style_preamble"], out_pptx, profile=t["profile"])
     slide_roles = {pos: block["type"] for pos, (block, _) in enumerate(plan)}
 
-    result = evaluate_deck(out_pptx, brief, client=judge_client or client,
-                           slide_roles=slide_roles, label=f"{safe_model(model)}_{ts}")
+    look_dir = os.path.join(t["workdir"], "decks", f"look_deck_{ts}")
+    result = evaluate_deck(out_pptx, brief, slide_roles=slide_roles,
+                           render_dir=look_dir, label=f"{safe_model(model)}_{ts}")
     return {
         "model": model,
         "source_name": source_name,

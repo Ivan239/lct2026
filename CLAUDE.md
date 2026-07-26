@@ -9,13 +9,20 @@ AI-генератор презентаций (хакатон, 2 мес, комм
 - Backend: `.venv/bin/uvicorn src.api.main:app --app-dir . --port 8000` (без --reload — после правок перезапускать).
 - Frontend: `cd frontend && npm run dev` (Vite, порт 5173).
 - Оценка + цикл улучшения: `.venv/bin/python3 scripts/improve_loop.py --model auto`
-  (генерит деку по каноническому брифу, оценивает по рубрике, пишет JSON в
-  `output/evaluations/`). Рубрика — `docs/evaluation_rubric.md`; харнесс —
-  `src/evaluation/` (rubric-веса + детерминированные гео/типографика-проверки без
-  токенов + судья GigaChat vision/text, разбитый на чанки с валидацией полноты);
-  бэкенды моделей — `src/llm_clients/backends.py` (судья ВСЕГДА независимый GigaChat
-  vision; RTX = обучающая видеокарта, в очереди, не инференс-бэкенд). Отчёты
-  итераций — `docs/improvement_runs/`.
+  (генерит деку по каноническому брифу, гоняет ДЕТЕРМИНИРОВАННЫЕ проверки без
+  токенов, пишет JSON в `output/evaluations/`, печатает пути рендеров). Рубрика —
+  `docs/evaluation_rubric.md`; харнесс — `src/evaluation/` (rubric-веса +
+  гео/типографика-проверки + render-based contrast). **LLM-критерии (композиция,
+  тон, галлюцинации и т.п.) НЕ оцениваются никаким API-вызовом** — GigaChat-vision
+  как судья был измерен и оказался плохим (деку с дублирующимися stats-слайдами и
+  пустыми нижними половинами почти всех слайдов оценил в 90+/100; пользователь на
+  тех же рендерах дал 3-4/10). Судья теперь — Claude: смотрит на рендеры (Read) и
+  выставляет оценки через `evaluation/claude_review.py::apply_claude_scores`
+  (CLI — `scripts/claude_score.py --eval <json> --scores '{"1.3":[2,"..."]}'`).
+  Итоговый взвешенный балл — композит по ~30 критериям, он НЕ обязан совпадать с
+  цельным впечатлением «показать не стыдно?» (это отдельный критерий 10.1).
+  Бэкенды моделей-генераторов — `src/llm_clients/backends.py` (RTX = обучающая
+  видеокарта, в очереди, не инференс-бэкенд). Отчёты итераций — `docs/improvement_runs/`.
 - Тесты: `.venv/bin/python3 -m pytest tests/ -q` — быстрые, без LLM и без LibreOffice; гоняй после каждого изменения генератора/кластеризации.
 - Рендер для проверки: `src/rendering/render.py::render_pptx_to_pngs` (LibreOffice + pdftoppm; отсутствующие шрифты подменяются на Arial только в превью-копии).
 
