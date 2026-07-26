@@ -25,6 +25,7 @@ OUTLINE_ROLES = [
 ]
 
 MAX_SECTION_DIVIDERS = 1
+MAX_IMAGE_SLIDES = 1
 MAX_BLOCKS = 10
 
 OUTLINE_PROMPT = """Ты планируешь структуру презентации по брифу.
@@ -124,14 +125,30 @@ def _enforce_outline_rules(outline):
     """Hard rules the model has demonstrably ignored when merely asked."""
     result = []
     dividers = 0
+    images = 0
     for item in outline[:MAX_BLOCKS]:
         if item["role"] == "section_divider":
             dividers += 1
             if dividers > MAX_SECTION_DIVIDERS:
                 continue
+        if item["role"] == "image_caption":
+            images += 1
+            if images > MAX_IMAGE_SLIDES:
+                continue
         result.append(item)
     if not result or result[0]["role"] != "title":
         result.insert(0, {"role": "title", "theme": "титульный слайд", "count": None})
+
+    # Asking for an image slide "where a visual helps" gets one only about half
+    # the time — same lesson as the divider cap: state it as a rule, enforce it
+    # in code. Placed just before the closing (a visual right before the CTA),
+    # and only when there's room under MAX_BLOCKS.
+    if images == 0 and len(result) < MAX_BLOCKS:
+        item = {"role": "image_caption", "theme": "визуальная иллюстрация продукта", "count": None}
+        if result[-1]["role"] == "closing":
+            result.insert(len(result) - 1, item)
+        else:
+            result.append(item)
     return result
 
 

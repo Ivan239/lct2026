@@ -44,7 +44,8 @@ def test_outline_retries_malformed_json_then_succeeds():
     client = FakeClient(["это не json {", good])
     outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"])
     assert client.calls == 2
-    assert [i["role"] for i in outline] == ["title", "bullet_list"]
+    # trailing image_caption is enforced in code (_enforce_outline_rules), not asked for
+    assert [i["role"] for i in outline] == ["title", "bullet_list", "image_caption"]
 
 
 def test_outline_title_forced_and_dividers_capped():

@@ -297,3 +297,40 @@ def test_out_of_bounds_box_flagged(tmp_path):
     prs.save(path)
     scores = deterministic.evaluate(path)
     assert scores["9.1"]["score"] < 5
+
+
+def test_outline_always_gets_one_image_slide():
+    """Asking the model for an image slide works ~half the time — the rule is
+    enforced in code (same lesson as the divider cap)."""
+    from content_parser.two_phase import MAX_BLOCKS, _enforce_outline_rules
+
+    def roles(outline):
+        return [i["role"] for i in _enforce_outline_rules(outline)]
+
+    # none requested -> exactly one inserted, just before the closing
+    out = roles([{"role": "title", "theme": "t", "count": None},
+                 {"role": "bullet_list", "theme": "b", "count": 3},
+                 {"role": "closing", "theme": "c", "count": None}])
+    assert out == ["title", "bullet_list", "image_caption", "closing"]
+
+    # no closing -> appended at the end
+    out = roles([{"role": "title", "theme": "t", "count": None},
+                 {"role": "bullet_list", "theme": "b", "count": 3}])
+    assert out == ["title", "bullet_list", "image_caption"]
+
+    # already present -> kept, not duplicated
+    out = roles([{"role": "title", "theme": "t", "count": None},
+                 {"role": "image_caption", "theme": "i", "count": None},
+                 {"role": "closing", "theme": "c", "count": None}])
+    assert out.count("image_caption") == 1
+
+    # more than one requested -> capped at one
+    out = roles([{"role": "title", "theme": "t", "count": None},
+                 {"role": "image_caption", "theme": "i1", "count": None},
+                 {"role": "image_caption", "theme": "i2", "count": None}])
+    assert out.count("image_caption") == 1
+
+    # a full outline stays within MAX_BLOCKS
+    full = [{"role": "title", "theme": "t", "count": None}]
+    full += [{"role": "bullet_list", "theme": f"b{i}", "count": 3} for i in range(MAX_BLOCKS + 3)]
+    assert len(_enforce_outline_rules(full)) <= MAX_BLOCKS
