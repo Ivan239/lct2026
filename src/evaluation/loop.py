@@ -166,17 +166,21 @@ def _synth_canvas_hints(source_pptx, plan, profile):
 
 
 def _gen_models(model):
-    """Primary model with GigaChat-2-Max as a safety net. A weak tier (base
-    GigaChat-2) intermittently returns a block that fails strict validation;
-    forcing models=[model] left call_with_model_fallback no fallback, so one bad
-    stats_kpi block raised ValueError and crashed the ENTIRE iteration (real, on
-    `--model auto` hitting GigaChat-2). The net only engages for the specific
-    blocks the primary can't produce validly, so the deck stays essentially
-    `model`'s. Only added for GigaChat tiers — a non-GigaChat client (RTX) can't
-    serve a GigaChat model name."""
-    if model in GIGACHAT_MODELS and model != "GigaChat-2-Max":
-        return [model, "GigaChat-2-Max"]
-    return [model]
+    """Primary model + a strong safety-net tier. ANY tier intermittently returns
+    a block that fails strict validation; forcing models=[model] left
+    call_with_model_fallback no fallback, so one bad block raised ValueError and
+    crashed the ENTIRE iteration. The net only engages for the specific blocks the
+    primary can't produce validly, so the deck stays essentially `model`'s.
+
+    Every GigaChat tier gets a net now — including Max itself: forcing Max used to
+    have NO fallback, and a run of malformed JSON from Max still crashed the run
+    (hit for real on `--model GigaChat-2-Max`). Max falls back to Pro (next
+    strongest); everyone else falls back to Max. Not for non-GigaChat clients
+    (RTX) — they can't serve a GigaChat model name."""
+    if model not in GIGACHAT_MODELS:
+        return [model]
+    net = "GigaChat-2-Pro" if model == "GigaChat-2-Max" else "GigaChat-2-Max"
+    return [model, net]
 
 
 def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_pptx, profile=None):

@@ -250,7 +250,8 @@ def test_gen_models_adds_max_safety_net():
     from evaluation.loop import _gen_models
     assert _gen_models("GigaChat-2") == ["GigaChat-2", "GigaChat-2-Max"]
     assert _gen_models("GigaChat-3-Ultra") == ["GigaChat-3-Ultra", "GigaChat-2-Max"]
-    assert _gen_models("GigaChat-2-Max") == ["GigaChat-2-Max"]  # no self-duplicate
+    # Max gets a net too (Pro) — forcing Max used to have no fallback and could crash
+    assert _gen_models("GigaChat-2-Max") == ["GigaChat-2-Max", "GigaChat-2-Pro"]
     assert _gen_models("rtx") == ["rtx"]                        # non-GigaChat: unchanged
 
 
