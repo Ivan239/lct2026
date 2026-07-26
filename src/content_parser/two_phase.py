@@ -68,7 +68,16 @@ __BRIEF__
     "image_caption": """Слайд с иллюстрацией. Картинка ПОКА не генерируется — нужно
 только описать, что на ней должно быть, чтобы зарезервировать место в композиции.
 Тема слайда: __THEME__
-Ответь ТОЛЬКО валидным JSON: {"title": "заголовок слайда, до 7 слов", "image": "что изобразить, 3-8 слов"}""",
+Используй НАСТОЯЩЕЕ название продукта и конкретику из брифа. ЗАПРЕЩЕНЫ заглушки
+вроде "Продукт X", "название продукта", "ваш продукт". Описание картинки должно быть
+конкретной сценой (что именно видно на изображении), а не общими словами вроде
+"иллюстрация продукта".
+Ответь ТОЛЬКО валидным JSON: {"title": "заголовок слайда, до 7 слов", "image": "что изобразить, 3-8 слов"}
+
+Бриф:
+---
+__BRIEF__
+---""",
     "closing": """Напиши контент финального слайда презентации.
 Тема: __THEME__
 Ответь ТОЛЬКО валидным JSON: {"title": "финальная фраза/призыв, до 6 слов", "subtitle": "подпись, до 10 слов"}""",
@@ -144,7 +153,12 @@ def _enforce_outline_rules(outline):
     # in code. Placed just before the closing (a visual right before the CTA),
     # and only when there's room under MAX_BLOCKS.
     if images == 0 and len(result) < MAX_BLOCKS:
-        item = {"role": "image_caption", "theme": "визуальная иллюстрация продукта", "count": None}
+        # Theme wording matters twice over: the model ECHOES it into the title,
+        # and a vague one starves the block. "визуальная иллюстрация продукта"
+        # produced a generic "Продукт X — визуализация"; a concrete, natural
+        # phrasing yields a grounded title ("Платформа «Поток» в действии").
+        # Measured against the real model before settling on this wording.
+        item = {"role": "image_caption", "theme": "как выглядит продукт в работе", "count": None}
         if result[-1]["role"] == "closing":
             result.insert(len(result) - 1, item)
         else:
