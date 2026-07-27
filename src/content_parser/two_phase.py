@@ -40,8 +40,8 @@ __MENU__
 - "count" — сколько пунктов/цифр планируется (для bullet_list и stats_kpi;
   подбирай под доступные ёмкости из списка выше; для остальных ролей — null)
 
-Первый блок — всегда role="title". Завершай блоком role="closing", если брифу
-подходит финал с призывом к действию. Где визуал усилит слайд (обзор продукта,
+Первый блок — всегда role="title". ПОСЛЕДНИЙ блок — всегда role="closing"
+(итог и призыв к действию), презентация обязана иметь финал. Где визуал усилит слайд (обзор продукта,
 процесс, результат), добавь 1 блок role="image_caption" — под него зарезервируется
 место под иллюстрацию.
 
@@ -157,6 +157,15 @@ def _enforce_outline_rules(outline):
         result.append(item)
     if not result or result[0]["role"] != "title":
         result.insert(0, {"role": "title", "theme": "титульный слайд", "count": None})
+
+    # A deck must END. The prompt asks for a closing "if the brief suits one",
+    # and the model takes that as optional — a real deck came back finishing on a
+    # stats slide, no wrap-up, no call to action, while the brief explicitly
+    # asked for one. Every presentation needs a last word, so make it a rule.
+    # Trailing non-closing blocks stay; the closing is appended after them.
+    if not any(item["role"] == "closing" for item in result):
+        result = result[:MAX_BLOCKS - 1] if len(result) >= MAX_BLOCKS else result
+        result.append({"role": "closing", "theme": "итог и призыв к действию", "count": None})
 
     # Asking for an image slide "where a visual helps" gets one only about half
     # the time — same lesson as the divider cap: state it as a rule, enforce it

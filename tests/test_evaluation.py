@@ -269,10 +269,10 @@ def test_outline_always_gets_one_image_slide():
                  {"role": "closing", "theme": "c", "count": None}])
     assert out == ["title", "bullet_list", "image_caption", "closing"]
 
-    # no closing -> appended at the end
+    # model omitted the closing -> one is enforced, and the image lands before it
     out = roles([{"role": "title", "theme": "t", "count": None},
                  {"role": "bullet_list", "theme": "b", "count": 3}])
-    assert out == ["title", "bullet_list", "image_caption"]
+    assert out == ["title", "bullet_list", "image_caption", "closing"]
 
     # already present -> kept, not duplicated
     out = roles([{"role": "title", "theme": "t", "count": None},
@@ -363,3 +363,31 @@ def test_stat_fingerprints_and_duplicate_rejection():
 
     # non-stat roles are untouched
     _reject_duplicate_stats({"bullets": ["a"]}, "bullet_list", nums, labels)
+
+
+def test_outline_always_ends_with_a_closing():
+    """A deck must end. Asking for a closing "if the brief suits one" got taken
+    as optional — a real deck finished on a stats slide with no wrap-up."""
+    from content_parser.two_phase import MAX_BLOCKS, _enforce_outline_rules
+
+    def roles(outline):
+        return [i["role"] for i in _enforce_outline_rules(outline)]
+
+    # model omitted the closing -> one is appended at the end
+    out = roles([{"role": "title", "theme": "t", "count": None},
+                 {"role": "stats_kpi", "theme": "s", "count": 3}])
+    assert out[-1] == "closing"
+    assert out.count("closing") == 1
+
+    # already present -> not duplicated, stays last
+    out = roles([{"role": "title", "theme": "t", "count": None},
+                 {"role": "bullet_list", "theme": "b", "count": 3},
+                 {"role": "closing", "theme": "c", "count": None}])
+    assert out.count("closing") == 1 and out[-1] == "closing"
+
+    # a full outline still gets a closing and stays within MAX_BLOCKS
+    full = [{"role": "title", "theme": "t", "count": None}]
+    full += [{"role": "bullet_list", "theme": f"b{i}", "count": 3} for i in range(MAX_BLOCKS + 3)]
+    out = roles(full)
+    assert len(out) <= MAX_BLOCKS
+    assert out[-1] == "closing"
