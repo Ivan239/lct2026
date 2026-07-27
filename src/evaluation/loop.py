@@ -52,8 +52,12 @@ def safe_model(model):
     return re.sub(r"[^A-Za-z0-9._-]", "_", model)
 
 
-def _workdir(model, out_root=LOOP_ROOT):
-    d = os.path.join(out_root, safe_model(model))
+def _workdir(model, source_name, out_root=LOOP_ROOT):
+    """Per (model, template) — NOT per model alone. The cached archetype map and
+    style card describe ONE template; keying them by model only meant that the
+    moment the loop rotated templates it would silently reuse template A's
+    parse for template B."""
+    d = os.path.join(out_root, safe_model(model), safe_model(source_name))
     os.makedirs(os.path.join(d, "rendered"), exist_ok=True)
     os.makedirs(os.path.join(d, "decks"), exist_ok=True)
     return d
@@ -63,7 +67,7 @@ def ensure_template(client, model, source_pptx, source_name, out_root=LOOP_ROOT,
     """Parse `source_pptx` under `model` if not already cached for it. Returns a
     dict with the archetype map, spec, style preamble, and meta (incl. which LLM
     parsed it and when). Reuses the cached parse on subsequent iterations."""
-    workdir = _workdir(model, out_root)
+    workdir = _workdir(model, source_name, out_root)
     arch_path = os.path.join(workdir, "archetypes.json")
     meta_path = os.path.join(workdir, "meta.json")
 

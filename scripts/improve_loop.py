@@ -27,28 +27,63 @@ from evaluation.loop import run_iteration
 from llm_clients import backends
 
 BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DEFAULT_SOURCE = os.path.join(BASE, "output", "templates", "template_a_corporate.pptx")
+TEMPLATES_DIR = os.path.join(BASE, "output", "templates")
 
 # Rotated across iterations for diversification. Max first — it's the verified
 # flagship. No judge model here anymore — Claude scores the LLM-mode criteria
 # by looking at the renders (see evaluation.claude_review), not an API call.
 ROTATION = ["GigaChat-2-Max", "GigaChat-2-Pro", "GigaChat-2", "GigaChat-3-Ultra"]
+
+# REAL customer templates, not the 4-slide toy presets. The presets were useful
+# to get the loop running, but their cases are trivial — one bullet family, one
+# stats family, generous boxes — so the deck always "fits" and the hard problems
+# (dense designer layouts, icon lists, capacity mismatches, mixed backgrounds)
+# never show up. These are the files actually uploaded to the product.
+TEMPLATE_ROTATION = [
+    "custom_f496182bb15f42bb",   # Т—Ж Учебный шаблон (12 слайдов, лёгкий по весу)
+    "custom_838830368dac3116",   # Т—Ж Монохромный — деловые презентации с цифрами (12)
+    "custom_47dfd8952eb47583",   # Т—Ж Универсальный — для любых задач (12)
+    "custom_30e96c06e2d47ec3",   # 31-слайдовая дека («example»)
+    "custom_78dc579e05d11399",   # November survey results 2024 — 69 слайдов, самый тяжёлый
+]
 STATE_FILE = os.path.join(BASE, ".loop_state.json")
 
 
-def _next_model():
-    """Pick the next rotation model and advance the counter (state file is
-    gitignored so it never pollutes the safety-net commits)."""
-    i = 0
+def _load_state():
     if os.path.exists(STATE_FILE):
         try:
-            i = json.load(open(STATE_FILE)).get("i", 0)
+            return json.load(open(STATE_FILE))
         except Exception:
-            i = 0
+            pass
+    return {}
+
+
+def _next_from_rotation():
+    """Advance model and template together, on co-prime-ish counters so the loop
+    walks through combinations instead of pinning one template to one model.
+    State file is gitignored so it never pollutes the safety-net commits."""
+    st = _load_state()
+    i, j = st.get("i", 0), st.get("t", 0)
     model = ROTATION[i % len(ROTATION)]
+    template = TEMPLATE_ROTATION[j % len(TEMPLATE_ROTATION)]
     with open(STATE_FILE, "w") as f:
-        json.dump({"i": (i + 1) % len(ROTATION)}, f)
-    return model
+        json.dump({"i": (i + 1) % len(ROTATION),
+                   "t": (j + 1) % len(TEMPLATE_ROTATION)}, f)
+    return model, template
+
+
+def _resolve_source(arg):
+    """`--source auto` (default) rotates real templates; a bare id like
+    custom_838830368dac3116 is resolved inside output/templates/; anything else
+    is treated as a path."""
+    if arg and arg != "auto":
+        if os.path.exists(arg):
+            return arg
+        candidate = os.path.join(TEMPLATES_DIR, f"{arg}.pptx")
+        if os.path.exists(candidate):
+            return candidate
+        raise SystemExit(f"шаблон не найден: {arg}")
+    return None
 
 # A canonical brief that exercises the whole rubric: a clear task, a named
 # audience and tone (for prompt-adherence/adaptation criteria), and a
@@ -69,7 +104,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="GigaChat-2-Max",
                     help="model name, or 'auto' to rotate through ROTATION")
-    ap.add_argument("--source", default=DEFAULT_SOURCE)
+    ap.add_argument("--source", default="auto",
+                    help="'auto' rotates real templates, or a template id / path")
     ap.add_argument("--brief-file", default=None)
     ap.add_argument("--out-json", default=None, help="also write the result bundle here")
     args = ap.parse_args()
@@ -79,15 +115,17 @@ def main():
         with open(args.brief_file, encoding="utf-8") as f:
             brief = f.read().strip()
 
-    requested = _next_model() if args.model == "auto" else args.model
+    rotated_model, rotated_template = _next_from_rotation()
+    requested = rotated_model if args.model == "auto" else args.model
+    source = _resolve_source(args.source) or os.path.join(TEMPLATES_DIR, f"{rotated_template}.pptx")
     try:
         gen_client, model_name = backends.resolve(requested)
     except backends.BackendUnavailable as e:
         print(f"[loop] модель {requested} в очереди: {e}")
         return
-    print(f"[loop] model={model_name} source={os.path.basename(args.source)}", flush=True)
-    result = run_iteration(gen_client, model_name, args.source, brief,
-                           source_name=os.path.splitext(os.path.basename(args.source))[0])
+    source_name = os.path.splitext(os.path.basename(source))[0]
+    print(f"[loop] model={model_name} source={source_name}", flush=True)
+    result = run_iteration(gen_client, model_name, source, brief, source_name=source_name)
 
     ev = result["evaluation"]
     print("\n" + format_report(ev))
