@@ -414,3 +414,40 @@ def test_kpi_number_slot_must_be_a_bare_figure():
     # clean block passes, non-stat roles untouched
     _reject_wordy_figures({"stats": [["+25%", "Рост конверсии"]]}, "stats_kpi")
     _reject_wordy_figures({"bullets": ["a"]}, "bullet_list")
+
+
+def test_transient_403_is_retried_not_fatal(monkeypatch):
+    """A momentary "403 Forbidden" from the gateway killed a whole loop run while
+    the token balance was untouched and the next call succeeded. It is not
+    skippable (another model wouldn't help) and must not be fatal — retry the
+    same model."""
+    import requests
+    from common import model_fallback as mf
+
+    monkeypatch.setattr(mf, "NETWORK_RETRY_DELAY_SECONDS", 0)
+
+    def resp(code):
+        r = requests.Response()
+        r.status_code = code
+        return r
+
+    calls = {"n": 0}
+
+    def flaky(model):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise requests.HTTPError("403", response=resp(403))
+        return "ok"
+
+    assert mf.call_with_model_fallback(flaky, ["M"]) == "ok"
+    assert calls["n"] == 2  # retried the same model, did not crash
+
+    # a genuinely non-retryable status still propagates immediately
+    def forbidden_always(model):
+        raise requests.HTTPError("418", response=resp(418))
+
+    try:
+        mf.call_with_model_fallback(forbidden_always, ["M"])
+        assert False, "non-transient status should propagate"
+    except requests.HTTPError:
+        pass

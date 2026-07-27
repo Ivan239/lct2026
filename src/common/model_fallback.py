@@ -18,6 +18,16 @@ DEFAULT_MODELS = TEXT_MODELS
 
 SKIPPABLE_STATUS_CODES = {402, 422}
 
+# Same flaky path as TRANSIENT_NETWORK_ERRORS below, but the failure arrives as
+# an HTTP status instead of a socket error. Measured: a run died on
+# "403 Forbidden" from /chat/completions while the token balance was untouched
+# (250M base / 39M Pro / 25M Max) and a fresh call seconds later succeeded on
+# the first try — so it was a momentary gateway rejection, not an auth or quota
+# verdict. 403 is not skippable (skipping models wouldn't help — it isn't about
+# the model) and re-raising killed the whole run, so it belongs here: retry the
+# same model after a pause, bounded by retries_per_model.
+TRANSIENT_STATUS_CODES = {403, 429, 500, 502, 503, 504}
+
 # Sber's endpoints resolve through whatever local network path reaches Russia
 # (observed resolving to addresses in the RFC 2544 benchmark range — i.e. some
 # local proxy/tunnel, not a direct route) and that path drops connections
@@ -55,9 +65,15 @@ def call_with_model_fallback(call_fn, models, retries_per_model=5):
             try:
                 return call_fn(model)
             except requests.HTTPError as e:
-                if e.response is not None and e.response.status_code in SKIPPABLE_STATUS_CODES:
+                code = e.response.status_code if e.response is not None else None
+                if code in SKIPPABLE_STATUS_CODES:
                     last_quota_error = e
                     break
+                if code in TRANSIENT_STATUS_CODES:
+                    last_network_error = e
+                    if attempt < retries_per_model - 1:
+                        time.sleep(NETWORK_RETRY_DELAY_SECONDS)
+                    continue
                 raise
             except (ValueError, KeyError) as e:
                 last_content_error = e
