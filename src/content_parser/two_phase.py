@@ -103,7 +103,12 @@ __BRIEF__
     "stats_kpi": """Напиши контент слайда с ключевыми цифрами для презентации по брифу.
 Тема слайда: __THEME__
 Ответь ТОЛЬКО валидным JSON:
-{"title": "заголовок слайда, до 7 слов", "stats": [РОВНО __COUNT__ пар вида ["число или короткая величина", "подпись до 6 слов"]]}
+{"title": "заголовок слайда, до 7 слов", "stats": [РОВНО __COUNT__ пар вида ["число", "подпись до 6 слов"]]}
+
+Первый элемент пары — ТОЛЬКО величина: цифры со знаком/единицей и НИЧЕГО больше.
+Правильно: "+25%", "-30 часов", "95%", "3 дня", "8 из 10".
+НЕПРАВИЛЬНО: "+18% конверсии", "-20% затрат времени", "90% точность прогноза" —
+название метрики идёт во ВТОРОЙ элемент (подпись), а не в число.
 
 Бриф:
 ---
@@ -204,6 +209,34 @@ def generate_outline(client, brief, spec, models=TEXT_MODELS, style_preamble="")
 
     outline = call_with_model_fallback(call, models)
     return _enforce_outline_rules(outline)
+
+
+# A KPI figure is a number plus at most a short unit: "+25%", "-30 часов",
+# "8 из 10", "3 дня". Anything wordier is the metric NAME leaking into the
+# number slot (where it renders as a wall of orange text instead of a punchy
+# figure) - it belongs in the label underneath.
+MAX_FIGURE_WORDS = 3
+MAX_FIGURE_CHARS = 10
+
+
+def _is_display_figure(num):
+    text = str(num).replace(" ", " ").strip()
+    if not text or not any(c.isdigit() for c in text):
+        return False
+    return len(text) <= MAX_FIGURE_CHARS and len(text.split()) <= MAX_FIGURE_WORDS
+
+
+def _reject_wordy_figures(block, role):
+    """Raise (-> retry) when a stat's number slot holds a phrase, not a figure.
+    Seen on a real deck: "+18% konversii", "-20% zatrat vremeni", "90% tochnost
+    prognoza" - the KPI row read as three orange sentences while the labels
+    below repeated the same words. Checked only in the retrying path, so a
+    stubborn model costs a couple of retries, never the whole run."""
+    if role != "stats_kpi":
+        return
+    bad = [num for num, _ in block.get("stats", []) if not _is_display_figure(num)]
+    if bad:
+        raise ValueError(f"stat numbers must be bare figures, got {bad!r}")
 
 
 def _validate_block(block, role, count):
@@ -344,6 +377,7 @@ def generate_block(client, role, theme, brief, count=None, models=TEXT_MODELS,
             block = _validate_block(extract_json(result["choices"][0]["message"]["content"]),
                                     role, count or 3)
             if enforce_unique:
+                _reject_wordy_figures(block, role)
                 _reject_duplicate_stats(block, role, used_nums, used_labels)
             return block
         return call

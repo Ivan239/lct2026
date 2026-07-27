@@ -391,3 +391,26 @@ def test_outline_always_ends_with_a_closing():
     out = roles(full)
     assert len(out) <= MAX_BLOCKS
     assert out[-1] == "closing"
+
+
+def test_kpi_number_slot_must_be_a_bare_figure():
+    """The big KPI slot is a display figure, not a sentence. The model kept
+    stuffing the metric name into it ("+18% конверсии"), which renders as three
+    orange sentences with the labels below repeating the same words."""
+    from content_parser.two_phase import _is_display_figure, _reject_wordy_figures
+
+    for good in ("+25%", "-30 часов", "95%", "3 дня", "8 из 10", "x10"):
+        assert _is_display_figure(good), good
+    for bad in ("+18% конверсии", "-20% затрат времени", "90% точность прогноза",
+                "рост эффективности", ""):
+        assert not _is_display_figure(bad), bad
+
+    try:
+        _reject_wordy_figures({"stats": [["+18% конверсии", "рост"]]}, "stats_kpi")
+        assert False, "wordy figure should have been rejected"
+    except ValueError:
+        pass
+
+    # clean block passes, non-stat roles untouched
+    _reject_wordy_figures({"stats": [["+25%", "Рост конверсии"]]}, "stats_kpi")
+    _reject_wordy_figures({"bullets": ["a"]}, "bullet_list")
