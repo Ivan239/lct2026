@@ -451,3 +451,39 @@ def test_transient_403_is_retried_not_fatal(monkeypatch):
         assert False, "non-transient status should propagate"
     except requests.HTTPError:
         pass
+
+
+def test_every_outline_role_has_a_filler():
+    """A role the outline can emit must be fillable, or generate() dies with
+    KeyError mid-run. Real case: T-Zh mono has a native image_caption family, so
+    the matcher handed a template slide to FILLERS, which had no such key."""
+    from content_parser.two_phase import OUTLINE_ROLES
+    from generator.generator import FILLERS
+    from generator.synthesizer import SYNTHESIZERS
+
+    assert [r for r in OUTLINE_ROLES if r not in FILLERS] == []
+    assert [r for r in OUTLINE_ROLES if r not in SYNTHESIZERS] == []
+
+
+def test_textless_slide_is_not_offered_as_family_member(tmp_path):
+    """A full-bleed decorative photo with zero text boxes can host no role's
+    content — it must drop out of the spec rather than be handed to a filler
+    with nothing to fill."""
+    from pptx.util import Inches as _In
+
+    from template_spec.builder import build_spec
+
+    prs = Presentation()
+    blank = prs.slide_layouts[6]
+    # slide 0: has text -> offerable
+    s0 = prs.slides.add_slide(blank)
+    tb = s0.shapes.add_textbox(_In(1), _In(1), _In(6), _In(1))
+    tb.text_frame.text = "Заголовок"
+    # slide 1: no text at all
+    prs.slides.add_slide(blank)
+    path = str(tmp_path / "t.pptx")
+    prs.save(path)
+
+    spec = build_spec(path, {0: "image_caption", 1: "image_caption"})
+    members = [s["idx"] for f in spec["families"] for s in f["slides"]]
+    assert members == [0], f"textless slide should be dropped, got {members}"

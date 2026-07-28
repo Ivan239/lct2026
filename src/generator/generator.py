@@ -1035,6 +1035,24 @@ def get_capacity(slide, archetype):
     return None
 
 
+def _fill_image_caption(slide, data, claimed_ids, resolver=None):
+    """Native image_caption slide: the template already supplies the artwork, so
+    we only write the heading and the caption describing what the image shows.
+    (Images still aren't generated — see synthesizer.synthesize_image_caption for
+    the from-scratch path, which draws a dashed placeholder frame instead.)
+
+    Slides with no text shape at all never reach here: template_spec.builder
+    drops them from their family, because there would be nothing to fill — a
+    real T-Zh member is a full-bleed photo with zero text boxes, and reaching
+    this filler with it used to raise KeyError before image_caption had one."""
+    title_shape = _pick_title_shape(slide, claimed_ids)
+    _set_run_text(title_shape, data.get("title", ""), claimed_ids, resolver=resolver)
+    caption_shape = _pick_body_shape(slide, claimed_ids)
+    _align_left_edges(title_shape, caption_shape)
+    _set_run_text(caption_shape, data.get("image", "") or data.get("caption", ""),
+                  claimed_ids, resolver=resolver)
+
+
 FILLERS = {
     "title": _fill_title,
     # Structurally the same as "title" (a heading ± subtitle) — the distinction is
@@ -1044,6 +1062,7 @@ FILLERS = {
     "bullet_list": _fill_bullet_list,
     "stats_kpi": _fill_stats_kpi,
     "two_column_comparison": _fill_two_column_comparison,
+    "image_caption": _fill_image_caption,
 }
 
 

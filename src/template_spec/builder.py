@@ -13,6 +13,7 @@ changing consumers."""
 from pptx import Presentation
 
 from generator.generator import get_capacity
+from generator.slide_kit import content_text_shapes
 
 # Roles that make sense as fill targets. "other" is everything we explicitly
 # refuse to reuse (e.g. chart-anchored slides) — never part of a family.
@@ -42,6 +43,16 @@ def build_spec(template_path, archetype_map, style_profile=None):
     by_role = {}
     for idx, role in archetype_map.items():
         if role not in FILLABLE_ROLES:
+            continue
+        # A slide with no text shape at all cannot carry ANY role's content —
+        # there is nowhere to put a title, a bullet or a caption. Real templates
+        # have these: the T-Zh mono deck's "image_caption" member is a full-bleed
+        # decorative photo with zero text boxes, and offering it crashed the run
+        # (the filler had nothing to fill). Deliberately not the same thing as
+        # common.pictures' stale-data exclusion: that photo IS legitimate decor,
+        # it just isn't fillable, so it drops out of the family and the role gets
+        # synthesized instead.
+        if not content_text_shapes(prs.slides[idx]):
             continue
         entry = {"idx": idx, "capacity": None, "bg": backgrounds.get(idx)}
         if role in COUNTED_ROLES:
