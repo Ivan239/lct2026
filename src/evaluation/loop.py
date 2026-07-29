@@ -207,7 +207,8 @@ def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_p
         used_labels |= labels
         plan.append((block, slide_idx))
     synth_canvas = _synth_canvas_hints(source_pptx, plan, profile)
-    generate(source_pptx, plan, out_pptx, synth_canvas=synth_canvas)
+    generate(source_pptx, plan, out_pptx, synth_canvas=synth_canvas,
+             canvas_backgrounds=(profile or {}).get("backgrounds"))
     skipped = [{"type": it["role"], "title": it.get("theme")} for it in skipped_items]
     return plan, skipped
 

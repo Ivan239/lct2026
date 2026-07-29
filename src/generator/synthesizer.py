@@ -9,6 +9,7 @@ from pptx.dml.color import RGBColor
 from pptx.enum.text import PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
+from generator.deck_style import _luminance, _slide_bg_hex
 from generator.slide_kit import clone_slide, content_text_shapes
 from generator.text_fit import estimate_block_height_in
 
@@ -75,7 +76,47 @@ def _resolve_bounds(prs, bounds_in):
 
 
 
-def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None):
+# Below this |luminance delta| text is unreadable on its background. Same
+# threshold deck_style uses for its deck-wide veto — see _recolor_for_canvas for
+# why that veto isn't enough on cloned canvases.
+_MIN_CANVAS_CONTRAST = 80
+
+
+def _recolor_for_canvas(palette, canvas_bg):
+    """deck_style already vetoes an unreadable text colour, but it compares
+    against the DECK-WIDE background (the majority of slides). A cloned canvas
+    keeps ITS OWN background, which the template's colour rotation may well have
+    made a different colour — the deck-wide-approved text then lands on it and
+    can vanish. Real defect: the T-Zh mono deck's synthesized comparison slide
+    got blue #213FFF body text (correct on that deck's white slides, verified
+    readable on its white closing) painted onto a blue canvas. The bullets were
+    invisible, and the pixel contrast backstop couldn't see it either — text
+    merged into its background forms no ink cluster at all.
+
+    canvas_bg is the MEASURED background of the canvas slide ((r,g,b) from the
+    render), not the XML one. The XML is not usable here: every slide of that
+    template declares the same <a:schemeClr val="lt1"/>, which the theme maps to
+    #FFFFFF, while the render shows four of them solid blue — the theme lies
+    about the deck's real look exactly as CLAUDE.md warns. Falls back to an
+    explicit srgb background when no measurement was supplied."""
+    if canvas_bg is None:
+        return palette
+    if isinstance(canvas_bg, (tuple, list)):
+        r, g, b = canvas_bg[:3]
+        bg_hex = f"#{r:02X}{g:02X}{b:02X}"
+    else:
+        bg_hex = canvas_bg
+    out = dict(palette)
+    bg_lum = _luminance(bg_hex)
+    readable = "#FFFFFF" if bg_lum < 128 else "#1A1A1A"
+    for key in ("text", "accent"):
+        colour = out.get(key)
+        if colour and abs(_luminance(colour) - bg_lum) < _MIN_CANVAS_CONTRAST:
+            out[key] = readable
+    return out
+
+
+def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None):
     """Adds a new slide (appended at the end of prs.slides) and returns
     (slide, index, palette, bounds).
 
@@ -92,7 +133,8 @@ def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None):
     if canvas_idx is not None:
         idx = clone_slide(prs, canvas_idx)
         slide = prs.slides[idx]
-        palette = _theme_palette(theme)
+        palette = _recolor_for_canvas(_theme_palette(theme),
+                                      canvas_bg if canvas_bg is not None else _slide_bg_hex(slide))
         removed = content_text_shapes(slide)
         placed = [s for s in removed if s.left is not None and s.top is not None and s.width and s.height]
         if placed:
@@ -170,11 +212,11 @@ def _add_bulleted_textbox(slide, left, top, width, height, lines, font_name, siz
     return box
 
 
-def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None):
+def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None, canvas_bg=None):
     """A cover/hero slide intentionally breaks from the "regular content" safe
     zone (big, vertically centered) — real cover slides do this too — so this
     one doesn't need the inferred content bounds the way the others do."""
-    slide, idx, t, _ = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx)
+    slide, idx, t, _ = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx, canvas_bg=canvas_bg)
     width, height = prs.slide_width, prs.slide_height
 
     title_box = slide.shapes.add_textbox(
@@ -200,8 +242,8 @@ def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None
     return idx
 
 
-def synthesize_bullet_list(prs, theme, bounds_in, data, resolver=None, canvas_idx=None):
-    slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx)
+def synthesize_bullet_list(prs, theme, bounds_in, data, resolver=None, canvas_idx=None, canvas_bg=None):
+    slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx, canvas_bg=canvas_bg)
     width = Emu(b["right"] - b["left"])
 
     title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"], resolver=resolver)
@@ -222,8 +264,8 @@ def synthesize_bullet_list(prs, theme, bounds_in, data, resolver=None, canvas_id
     return idx
 
 
-def synthesize_stats_kpi(prs, theme, bounds_in, data, resolver=None, canvas_idx=None):
-    slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx)
+def synthesize_stats_kpi(prs, theme, bounds_in, data, resolver=None, canvas_idx=None, canvas_bg=None):
+    slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx, canvas_bg=canvas_bg)
 
     title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"], resolver=resolver)
     content_top = Emu(title_box.top + title_box.height + Emu(int(Inches(0.35))))
@@ -250,8 +292,8 @@ def synthesize_stats_kpi(prs, theme, bounds_in, data, resolver=None, canvas_idx=
     return idx
 
 
-def synthesize_two_column_comparison(prs, theme, bounds_in, data, resolver=None, canvas_idx=None):
-    slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx)
+def synthesize_two_column_comparison(prs, theme, bounds_in, data, resolver=None, canvas_idx=None, canvas_bg=None):
+    slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx, canvas_bg=canvas_bg)
     margin = Emu(int(Inches(0.2)))
 
     title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"], resolver=resolver)
@@ -325,8 +367,8 @@ def _add_image_placeholder(slide, left, top, width, height, caption, t):
     return shp
 
 
-def synthesize_image_caption(prs, theme, bounds_in, data, resolver=None, canvas_idx=None):
-    slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx)
+def synthesize_image_caption(prs, theme, bounds_in, data, resolver=None, canvas_idx=None, canvas_bg=None):
+    slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx, canvas_bg=canvas_bg)
     title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"], resolver=resolver)
     # Reserve at least a two-line title's worth of clearance: the frame is large,
     # so any overlap with a title that wrapped to a second line is glaring (the

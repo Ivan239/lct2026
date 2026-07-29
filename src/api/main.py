@@ -351,6 +351,24 @@ def upload_template(file: UploadFile = File(...), model: str | None = Form(None)
     }
 
 
+def _measured_backgrounds(template_id):
+    """{template_slide_idx: (r,g,b)} measured from the renders — what the slide
+    ACTUALLY looks like. Synthesis needs this to keep text readable on a cloned
+    canvas; the XML can't answer it (the T-Zh mono template declares the same
+    schemeClr on every slide while four of them render solid blue)."""
+    try:
+        png_paths = [os.path.join(RENDERED_DIR, f) for f in sorted(
+            f for f in os.listdir(RENDERED_DIR)
+            if f.startswith(f"{template_id}-") and f.endswith(".png")
+        )]
+        if not png_paths:
+            return {}
+        return build_measured_profile(png_paths, _load_archetypes(template_id))["backgrounds"]
+    except Exception as e:  # noqa: BLE001 — advisory: without it text just keeps the old colour
+        print(f"[measured_bg] {template_id}: {e}", flush=True)
+        return {}
+
+
 def _synth_canvas_hints(template_id, plan):
     """{plan_position: template_slide_idx} for SYNTHESIZE positions (plan 9.3):
     the canvas is the template slide with the FEWEST content boxes (covers/
@@ -512,7 +530,8 @@ def generate_presentation(req: GenerateRequest):
         try:
             _set_progress("Собираем .pptx в стиле шаблона")
             generate(template_path, plan, out_pptx,
-                     synth_canvas=_synth_canvas_hints(req.template_id, plan))
+                     synth_canvas=_synth_canvas_hints(req.template_id, plan),
+                     canvas_backgrounds=_measured_backgrounds(req.template_id))
             _set_progress("Рендерим превью слайдов")
             slide_png_paths = render_pptx_to_pngs(out_pptx, GENERATED_DIR)
         except Exception as e:

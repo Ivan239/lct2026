@@ -487,3 +487,29 @@ def test_textless_slide_is_not_offered_as_family_member(tmp_path):
     spec = build_spec(path, {0: "image_caption", 1: "image_caption"})
     members = [s["idx"] for f in spec["families"] for s in f["slides"]]
     assert members == [0], f"textless slide should be dropped, got {members}"
+
+
+def test_canvas_recolor_rescues_text_that_matches_its_background():
+    """deck_style vetoes unreadable text against the DECK-WIDE background, but a
+    cloned canvas keeps its own. Real defect: blue #213FFF body text (correct on
+    the deck's white slides) painted onto a blue canvas was invisible, and the
+    pixel backstop couldn't see it either — text merged into its background
+    forms no ink cluster at all.
+
+    The background must come from the RENDER: that template declares the same
+    <a:schemeClr val="lt1"/> on every slide (theme maps it to #FFFFFF) while
+    four of them render solid blue."""
+    from generator.synthesizer import _recolor_for_canvas
+
+    palette = {"text": "#213FFF", "accent": "#F54104",
+               "major_font": "A", "minor_font": "B", "bg": "#FFFFFF"}
+
+    on_blue = _recolor_for_canvas(palette, (32, 56, 248))   # measured blue canvas
+    assert on_blue["text"] == "#FFFFFF", "invisible blue-on-blue must be rescued"
+
+    on_white = _recolor_for_canvas(palette, (248, 248, 248))
+    assert on_white["text"] == "#213FFF", "readable brand colour must be kept"
+    assert on_white["accent"] == "#F54104"
+
+    assert _recolor_for_canvas(palette, "#2340FF")["text"] == "#FFFFFF"  # hex also accepted
+    assert _recolor_for_canvas(palette, None) == palette                 # unknown bg: no change

@@ -1131,7 +1131,7 @@ def _reorder_and_prune_slides(prs, ordered_slide_indices):
         prs.part.drop_rel(el.get(qn("r:id")))
 
 
-def generate(template_path, plan, out_path, synth_canvas=None):
+def generate(template_path, plan, out_path, synth_canvas=None, canvas_backgrounds=None):
     """plan: ordered list of (content_block, template_slide_index) — or
     (content_block, SYNTHESIZE) when the matcher found no template slide for that
     archetype but it's one the generator can build from scratch — as produced by
@@ -1182,9 +1182,14 @@ def generate(template_path, plan, out_path, synth_canvas=None):
                 # synthesized slides follow what the slides actually show.
                 synth_theme = apply_observed_style(theme, observe_deck_style(prs))
                 bounds_computed = True
+            # Measured background of the ORIGINAL canvas slide (from the
+            # render), so the synthesizer can rescue text that would land
+            # invisible on it. Keyed by the template index, not the clone.
+            canvas_src = (synth_canvas or {}).get(position)
             new_idx = SYNTHESIZERS[block["type"]](
                 prs, synth_theme, bounds_in, block, resolver=resolver,
                 canvas_idx=canvas_clone_by_position.get(position),
+                canvas_bg=(canvas_backgrounds or {}).get(canvas_src),
             )
             final_order.append(new_idx)
             continue
