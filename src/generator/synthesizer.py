@@ -11,7 +11,7 @@ from pptx.util import Emu, Inches, Pt
 
 from generator.deck_style import _luminance, _slide_bg_hex
 from generator.slide_kit import clone_slide, content_text_shapes
-from generator.text_fit import estimate_block_height_in
+from generator.text_fit import cap_size_to_longest_word, estimate_block_height_in
 
 # Used only when the template has too few real content shapes to infer bounds
 # from (see layout_bounds.infer_content_bounds returning None).
@@ -305,9 +305,20 @@ def synthesize_two_column_comparison(prs, theme, bounds_in, data, resolver=None,
     col_width_in = Emu(col_width).inches
     major_metrics = _metrics_for(resolver, t["major_font"])
     minor_metrics = _metrics_for(resolver, t["minor_font"])
+
+    # A column is half the content width, and on a canvas whose bounds exclude a
+    # photo it gets narrower still — narrow enough that the renderer breaks a
+    # long word mid-letter. Seen on the T-Zh mono canvas: a 20pt heading came out
+    # as "Разрозненнос/ть данных". Height-only fitting accepts that happily, so
+    # cap both sizes on the LONGEST WORD, exactly what this helper exists for.
+    headings = [data.get("left_heading", ""), data.get("right_heading", "")]
+    points_all = list(data.get("left_points", [])) + list(data.get("right_points", []))
+    heading_pt = cap_size_to_longest_word(headings, col_width, 20, metrics=major_metrics, bold=True)
+    point_pt = cap_size_to_longest_word(points_all, col_width, 15, metrics=minor_metrics)
+
     est_in = max(
-        estimate_block_height_in(heading, col_width_in, 20, metrics=major_metrics)
-        + estimate_block_height_in(points, col_width_in, 15, metrics=minor_metrics)
+        estimate_block_height_in(heading, col_width_in, heading_pt, metrics=major_metrics)
+        + estimate_block_height_in(points, col_width_in, point_pt, metrics=minor_metrics)
         for heading, points in (
             (data.get("left_heading", ""), data.get("left_points", [])),
             (data.get("right_heading", ""), data.get("right_points", [])),
@@ -324,11 +335,11 @@ def synthesize_two_column_comparison(prs, theme, bounds_in, data, resolver=None,
         tf = box.text_frame
         tf.word_wrap = True
         tf.text = heading
-        _style_paragraph(tf.paragraphs[0], t["major_font"], 20, t["accent"], bold=True)
+        _style_paragraph(tf.paragraphs[0], t["major_font"], heading_pt, t["accent"], bold=True)
         for point in points:
             p = tf.add_paragraph()
             p.text = point
-            _style_paragraph(p, t["minor_font"], 15, t["text"])
+            _style_paragraph(p, t["minor_font"], point_pt, t["text"])
 
     return idx
 
