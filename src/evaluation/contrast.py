@@ -101,3 +101,86 @@ def evaluate_contrast(png_paths, threshold=LOW_CONTRAST_RATIO):
     per = [slide_text_contrast(p) for p in png_paths]
     low = [i for i, c in enumerate(per) if c is not None and c < threshold]
     return {"per_slide": per, "low_contrast_slides": low}
+
+
+# --- Declared-colour check -------------------------------------------------
+# The pixel scan above can only see text that differs from the background by at
+# least INK_DISTANCE. Text painted almost exactly in the background colour forms
+# no distinct cluster at all, so the scan reports "no ink" and the slide passes
+# silently — the worst case slips through. Measured on a real deck: subtitle
+# #1D1C1D on a (16,16,16) slide is 22 RGB units from the background, invisible
+# to the eye AND invisible to the scan.
+#
+# So read the colours the file DECLARES and compare them with the MEASURED
+# background. Only explicit run colours are used; theme/inherited ones are left
+# alone rather than guessed at.
+#
+# Two false-positive guards, both learned from real decks:
+#
+# 1. A designer may legitimately put light text on a dark button sitting on a
+#    light slide, which looks identical to this test from the XML. So a slide is
+#    only flagged when the near-invisible runs carry at least
+#    INVISIBLE_TEXT_SHARE of its characters — a whole unreadable slide trips it,
+#    a small inverted label does not.
+# 2. WCAG contrast is a LUMINANCE ratio and ignores hue, so a high-chroma brand
+#    pairing scores as badly as invisible text: T-Zh's red-on-blue slide measures
+#    1.08, yet the text is perfectly legible because the hues are 339 RGB units
+#    apart. "Invisible" must mean the colours are actually CLOSE, so a flag needs
+#    low contrast AND small colour distance. The real failures sit far under this
+#    (#3D3D3D on (16,16,16) is 78 apart, #1D1C1D on (16,16,16) just 22).
+INVISIBLE_TEXT_SHARE = 0.5
+INVISIBLE_MAX_DISTANCE = 120
+
+
+def _declared_run_colours(slide):
+    """[(text_length, (r,g,b))] for runs with an EXPLICIT rgb colour."""
+    out = []
+    for shape in slide.shapes:
+        if not shape.has_text_frame:
+            continue
+        for para in shape.text_frame.paragraphs:
+            for run in para.runs:
+                text = run.text or ""
+                if not text.strip():
+                    continue
+                colour = run.font.color
+                try:
+                    # .rgb raises for scheme colours — those are inherited, skip.
+                    if colour is None or colour.type is None or colour.rgb is None:
+                        continue
+                    rgb = colour.rgb
+                except Exception:  # noqa: BLE001 — scheme colour, nothing to compare
+                    continue
+                out.append((len(text.strip()), (rgb[0], rgb[1], rgb[2])))
+    return out
+
+
+def evaluate_declared_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATIO):
+    """Slides whose declared text colour is invisible against the measured
+    background. Returns {"per_slide": [worst_ratio|None], "invisible_slides": [idx]}."""
+    from pptx import Presentation
+
+    from design_system.style_profile import page_base_color, slide_background
+
+    prs = Presentation(pptx_path)
+    slides = list(prs.slides)
+    page_base = page_base_color(png_paths) if png_paths else None
+
+    per, flagged = [], []
+    for i, slide in enumerate(slides):
+        bg = slide_background(png_paths[i], page_base) if i < len(png_paths) else None
+        runs = _declared_run_colours(slide)
+        if bg is None or not runs:
+            per.append(None)
+            continue
+        total = sum(n for n, _ in runs) or 1
+        bad_chars, worst = 0, None
+        for n, rgb in runs:
+            ratio = contrast_ratio(rgb, bg)
+            worst = ratio if worst is None else min(worst, ratio)
+            if ratio < threshold and _dist(rgb, bg) < INVISIBLE_MAX_DISTANCE:
+                bad_chars += n
+        per.append(worst)
+        if bad_chars / total >= INVISIBLE_TEXT_SHARE:
+            flagged.append(i)
+    return {"per_slide": per, "invisible_slides": flagged}

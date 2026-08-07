@@ -513,3 +513,43 @@ def test_canvas_recolor_rescues_text_that_matches_its_background():
 
     assert _recolor_for_canvas(palette, "#2340FF")["text"] == "#FFFFFF"  # hex also accepted
     assert _recolor_for_canvas(palette, None) == palette                 # unknown bg: no change
+
+
+def test_declared_colour_check_catches_invisible_text(tmp_path):
+    """The pixel scan only sees text that DIFFERS from the background, so text
+    painted almost in the background colour forms no ink cluster and slips
+    through. Real case: (33,63,255) bullets on a (32,56,248) slide — the eye
+    reads that slide as empty. Reading declared run colours catches it.
+
+    Guard: WCAG contrast ignores hue, so a high-chroma brand pairing (red on
+    blue, ~1.08 but perfectly legible) must NOT be flagged — that needs the
+    colour-distance condition too."""
+    from PIL import Image
+    from pptx.dml.color import RGBColor
+
+    from evaluation.contrast import evaluate_declared_contrast
+
+    def deck_with(colour, bg):
+        prs = Presentation()
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        box = slide.shapes.add_textbox(Inches(1), Inches(1), Inches(6), Inches(2))
+        run = box.text_frame.paragraphs[0].add_run()
+        run.text = "Данные разбросаны по разным источникам, единой картины нет"
+        run.font.color.rgb = RGBColor(*colour)
+        path = str(tmp_path / f"deck_{colour}_{bg}.pptx")
+        prs.save(path)
+        png = str(tmp_path / f"render_{colour}_{bg}.png")
+        Image.new("RGB", (960, 540), bg).save(png)
+        return path, [png]
+
+    # invisible: text colour ~ background colour
+    path, pngs = deck_with((33, 63, 255), (32, 56, 248))
+    assert evaluate_declared_contrast(path, pngs)["invisible_slides"] == [0]
+
+    # legible brand pairing: low WCAG ratio but far apart in colour -> not flagged
+    path, pngs = deck_with((245, 65, 4), (32, 56, 248))
+    assert evaluate_declared_contrast(path, pngs)["invisible_slides"] == []
+
+    # ordinary readable text -> not flagged
+    path, pngs = deck_with((20, 20, 20), (248, 248, 248))
+    assert evaluate_declared_contrast(path, pngs)["invisible_slides"] == []

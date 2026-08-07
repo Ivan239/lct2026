@@ -77,7 +77,15 @@ def evaluate_deck(pptx_path, brief, slide_roles=None, render_dir=None,
     # white breather defect the eye catches but font/overflow math misses. Only
     # lowers 1.1, never raises it.
     cres = contrast.evaluate_contrast(png_paths)
-    low = cres["low_contrast_slides"]
+    # Second, independent pass: the pixel scan only sees text that differs from
+    # the background; text painted almost IN the background colour forms no
+    # cluster and slips through. Reading declared run colours against the
+    # measured background catches it — found real invisible bullets, (33,63,255)
+    # text on a (32,56,248) slide, which the eye reads as "the slide is empty".
+    dres = contrast.evaluate_declared_contrast(pptx_path, png_paths)
+    cres["invisible_text_slides"] = dres["invisible_slides"]
+    cres["declared_per_slide"] = dres["per_slide"]
+    low = sorted(set(cres["low_contrast_slides"]) | set(dres["invisible_slides"]))
     if low:
         frac = len(low) / len(png_paths)
         cscore = max(1, min(5, round(5 - 4 * frac)))
@@ -85,7 +93,9 @@ def evaluate_deck(pptx_path, brief, slide_roles=None, render_dir=None,
         if cur is None or cscore < cur:
             scores["1.1"] = {
                 "score": cscore,
-                "detail": f"низкий контраст текст/фон на слайдах {[i + 1 for i in low]}"
+                "detail": (f"низкий контраст текст/фон на слайдах {[i + 1 for i in low]}"
+                           + (f"; НЕВИДИМЫЙ текст на {[i + 1 for i in dres['invisible_slides']]}"
+                              if dres["invisible_slides"] else ""))
                           + (f"; {scores['1.1']['detail']}" if scores.get('1.1', {}).get('detail') else ""),
             }
 
