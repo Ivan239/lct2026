@@ -4,7 +4,7 @@ a blank white page. Verified structurally (renders are eyeballed in sweeps)."""
 
 import os
 
-from conftest import TEMPLATES_DIR, requires
+from conftest import SURVEY_31, TEMPLATES_DIR, requires
 
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -172,3 +172,49 @@ def test_image_frame_does_not_reserve_room_for_a_wrap_that_cannot_happen():
     assert 0 < gaps["short"] <= int(Inches(0.4)), (
         f"dead band under a title that cannot wrap: {Emu(gaps['short']).inches:.2f}in")
     assert gaps["long"] > 0, "the frame climbed into a title that did wrap"
+
+
+@requires(SURVEY_31)
+def test_synthesized_block_steps_around_the_canvas_decor():
+    """The survey-31 canvas keeps a small hand-drawn heart at 4.53-5.46in, and
+    the synthesized KPI block landed across it — the render showed the artwork
+    sitting on top of «клиентов в месяц».
+
+    Two causes, and neither fix works alone. The canvas's own band is 2.82in on
+    a 7.5in slide, while a heading plus three KPI pairs need about 2.9in, so the
+    content overflowed the band's bottom — which is exactly where the heart
+    lives. Widening the band alone just re-centres the block onto the heart;
+    stepping around obstacles alone does nothing, because the 2.82in band offers
+    no clear position. Measured in that order, one attempt at a time."""
+    from pptx.util import Emu
+
+    from generator.deck_style import apply_observed_style, observe_deck_style
+    from generator.layout_bounds import infer_content_bounds
+    from generator.synthesizer import synthesize_stats_kpi
+    from template_parser.parser import extract_template, extract_theme
+
+    prs = Presentation(SURVEY_31)
+    theme = apply_observed_style(extract_theme(SURVEY_31), observe_deck_style(prs))
+    bounds = infer_content_bounds(extract_template(SURVEY_31))
+
+    idx = synthesize_stats_kpi(
+        prs, theme, bounds,
+        {"title": "Результаты",
+         "stats": [["-40%", "времени на отчёт"], ["+18", "клиентов в месяц"],
+                   ["4 дня", "на внедрение"]]},
+        canvas_idx=29)
+    slide = prs.slides[idx]
+
+    decor = [s for s in slide.shapes if "PICTURE" in str(s.shape_type)]
+    assert decor, "fixture changed: this canvas is supposed to carry decor"
+    texts = [s for s in slide.shapes if s.has_text_frame and s.text_frame.text.strip()]
+    assert len(texts) >= 4, f"expected a title and KPI pairs, got {len(texts)}"
+
+    for art in decor:
+        art_top, art_bottom = int(art.top), int(art.top + art.height)
+        for box in texts:
+            top, bottom = int(box.top), int(box.top + box.height)
+            assert not (top < art_bottom and bottom > art_top), (
+                f"{box.text_frame.text.strip()[:24]!r} at "
+                f"{Emu(top).inches:.2f}-{Emu(bottom).inches:.2f}in runs across decor at "
+                f"{Emu(art_top).inches:.2f}-{Emu(art_bottom).inches:.2f}in")

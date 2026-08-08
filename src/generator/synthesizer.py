@@ -127,6 +127,16 @@ def _recolor_for_canvas(palette, canvas_bg):
 # slides well above it.
 _MIN_CANVAS_BAND_FRACTION = 0.4
 
+# …and it also has to be big enough in absolute terms. A band can clear the
+# fraction above and still be too small for a title plus a body: the survey-31
+# canvas offers 2.82in on a 7.5in slide (47% of the template band, just over the
+# cut), while a heading and three KPI pairs need about 2.9in. The content then
+# overflowed the band's bottom edge — which is exactly where that canvas keeps a
+# small decorative heart, so the render showed the artwork sitting on top of
+# «клиентов в месяц». Measured over the corpus, this second test moves 7 more
+# canvases onto the template-wide band, all of them on the wide survey decks.
+_MIN_CANVAS_BAND_SLIDE_FRACTION = 0.4
+
 
 def _band_height(bounds):
     return int(bounds["bottom"]) - int(bounds["top"])
@@ -234,8 +244,9 @@ def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None)
             # came out NEGATIVE, and synthesize_image_caption silently drew
             # nothing on a full-page empty card. Every T-Zh template has three
             # such canvases, and they are exactly the ones offered for synthesis.
-            if _band_height(bounds) < _MIN_CANVAS_BAND_FRACTION * _band_height(
-                    _resolve_bounds(prs, bounds_in)):
+            if _band_height(bounds) < max(
+                    _MIN_CANVAS_BAND_FRACTION * _band_height(_resolve_bounds(prs, bounds_in)),
+                    _MIN_CANVAS_BAND_SLIDE_FRACTION * prs.slide_height):
                 bounds = None
         if bounds is None:
             bounds = _clip_to_canvas_chrome(
@@ -263,18 +274,65 @@ def _metrics_for(resolver, font_name):
     return resolver.metrics_for(font_name) if resolver is not None else None
 
 
-def _centered_top(content_top, bounds_bottom, est_height_in):
+# A cloned canvas keeps its decorative art, and small pieces of it sit inside the
+# content area. Above this share of the slide a picture is a background or a full
+# photo — unavoidable, and stepping around it would mean leaving the band.
+_OBSTACLE_MAX_AREA_FRACTION = 0.2
+
+
+def _decor_obstacles(slide, slide_width, slide_height):
+    """Vertical spans (top, bottom) of the canvas's small decorative pictures."""
+    area = (slide_width or 0) * (slide_height or 0)
+    if not area:
+        return []
+    spans = []
+    for shape in slide.shapes:
+        if "PICTURE" not in str(shape.shape_type):
+            continue
+        if shape.top is None or not shape.width or not shape.height:
+            continue
+        if (shape.width * shape.height) / area >= _OBSTACLE_MAX_AREA_FRACTION:
+            continue
+        spans.append((int(shape.top), int(shape.top + shape.height)))
+    return spans
+
+
+def _centered_top(content_top, bounds_bottom, est_height_in, obstacles=()):
     """Top position that vertically centers a content block of the estimated
     height between content_top and the bottom bound. Synthesized slides have no
     designer to fill the lower half — a short block left hanging right under
     the title reads as an accidentally half-empty slide (same defect class as
     generator._center_if_underfilled, but for slides we build ourselves).
-    The title stays where native slides put theirs; only the body block moves."""
+    The title stays where native slides put theirs; only the body block moves.
+
+    obstacles: vertical spans of canvas decor the block should step around.
+    Measured defect: the survey-31 canvas keeps a small hand-drawn heart at
+    4.53-5.46in and the centred KPI block landed across it, so the render showed
+    the artwork sitting on «клиентов в месяц». Centring is a preference; not
+    colliding with the template's own artwork outranks it, so the block takes the
+    nearest clear position and stays put only when the band offers none.
+
+    Order matters here, and this was measured the hard way: on the canvas's own
+    2.82in band there WAS no clear position, so this did nothing until the band
+    widened (see _MIN_CANVAS_BAND_SLIDE_FRACTION). The two fixes only work
+    together."""
     avail = int(bounds_bottom) - int(content_top)
     est = int(Inches(max(0.0, est_height_in)))
     if est >= avail:
         return content_top
-    return Emu(int(content_top) + (avail - est) // 2)
+    top = int(content_top) + (avail - est) // 2
+    lo, hi = int(content_top), int(bounds_bottom) - est
+
+    def clashes(candidate):
+        return any(candidate < ob_bottom and candidate + est > ob_top
+                   for ob_top, ob_bottom in obstacles)
+
+    if not clashes(top):
+        return Emu(top)
+    clear = [c for ob_top, ob_bottom in obstacles
+             for c in (ob_top - est, ob_bottom)
+             if lo <= c <= hi and not clashes(c)]
+    return Emu(min(clear, key=lambda c: abs(c - top)) if clear else top)
 
 
 def _title_fits_one_line(text, width_emu, size_pt, metrics, slack=0.1):
@@ -368,7 +426,8 @@ def synthesize_bullet_list(prs, theme, bounds_in, data, resolver=None, canvas_id
         [f"•  {line}" for line in bullets], Emu(width).inches, 18,
         metrics=_metrics_for(resolver, t["minor_font"]),
     ) + max(0, len(bullets) - 1) * 10 / 72  # space_before between items
-    content_top = _centered_top(content_top, b["bottom"], est_in)
+    content_top = _centered_top(content_top, b["bottom"], est_in,
+                                _decor_obstacles(slide, prs.slide_width, prs.slide_height))
     content_height = max(Emu(int(Inches(0.5))), Emu(b["bottom"] - content_top))
 
     _add_bulleted_textbox(
@@ -384,7 +443,8 @@ def synthesize_stats_kpi(prs, theme, bounds_in, data, resolver=None, canvas_idx=
     title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"], resolver=resolver)
     content_top = Emu(title_box.top + title_box.height + Emu(int(Inches(0.35))))
     # Number box (0.9") + label offset (1.0") + label box (0.8") — fixed layout.
-    content_top = _centered_top(content_top, b["bottom"], 1.8)
+    content_top = _centered_top(content_top, b["bottom"], 1.8,
+                                _decor_obstacles(slide, prs.slide_width, prs.slide_height))
 
     stats = data.get("stats", [])
     if stats:
@@ -438,7 +498,8 @@ def synthesize_two_column_comparison(prs, theme, bounds_in, data, resolver=None,
             (data.get("right_heading", ""), data.get("right_points", [])),
         )
     )
-    col_top = _centered_top(col_top, b["bottom"], est_in)
+    col_top = _centered_top(col_top, b["bottom"], est_in,
+                            _decor_obstacles(slide, prs.slide_width, prs.slide_height))
     col_height = Emu(b["bottom"] - col_top)
 
     for left, heading, points in (
