@@ -28,6 +28,7 @@ from generator.text_fit import (
     horizontal_margins_in,
     vertical_insets_emu,
 )
+from generator.slide_kit import is_chrome_shape, slide_height
 from qa.geometry import SPARSE_EXEMPT_ROLES, _is_content_shape
 from template_parser.parser import extract_theme
 
@@ -98,7 +99,21 @@ def _norm_text(s):
 
 
 def _content_shapes(slide):
-    return [s for s in slide.shapes if _is_content_shape(s)]
+    """The slide's CONTENT boxes — chrome excluded.
+
+    Chrome is the designer's furniture, not our text, and judging it as body
+    copy makes the harness wrong about a deck that is fine. Measured on the
+    T-Zh universal deck: 17 of 35 "content" boxes counted as unreadable fine
+    print, every one of them the template's own 8pt «2025», running topic or
+    page number, and zero real overflows. Readability came out at 3 for a deck
+    with nothing wrong with it.
+
+    Sharpened by an earlier fix of ours: until iter31 that furniture was blanked
+    on the way out, so it never reached this count. Repairing the product made
+    the measurement look worse."""
+    height = slide_height(slide)
+    return [s for s in slide.shapes
+            if _is_content_shape(s) and not is_chrome_shape(s, height)]
 
 
 def _shape_runs(shape):

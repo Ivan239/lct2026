@@ -789,3 +789,36 @@ def test_a_box_sitting_on_a_photo_gets_no_verdict():
     assert measured is not None
     ratio, ink, bg = measured
     assert _quantize(bg) == _quantize((160, 224, 192)) and ratio > 10
+
+
+def test_chrome_is_not_judged_as_body_copy(tmp_path):
+    """The deterministic checks judge CONTENT. Chrome is the designer's
+    furniture — «2025», a running topic, a page number — and reading it as body
+    copy makes the harness wrong about a deck that is fine: on the T-Zh
+    universal deck 17 of 35 "content" boxes counted as unreadable fine print,
+    every one of them 8pt template furniture, with zero real overflows.
+    Readability scored 3 for a deck with nothing wrong with it.
+
+    Sharpened by one of our own fixes: until iter31 that furniture was blanked
+    on the way out, so it never reached the count. Repairing the product made
+    the measurement look worse."""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+
+    from evaluation.deterministic import MIN_READABLE_PT, _content_shapes
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Inches(10), Inches(5.63)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+
+    body = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(6), Inches(1))
+    body.text_frame.text = "Забота о клиенте"
+    body.text_frame.paragraphs[0].runs[0].font.size = Pt(18)
+
+    footer = slide.shapes.add_textbox(Inches(0.4), Inches(5.2), Inches(1), Inches(0.2))
+    footer.text_frame.text = "2025"
+    footer.text_frame.paragraphs[0].runs[0].font.size = Pt(8)
+    assert 8 < MIN_READABLE_PT, "fixture must be below the fine-print threshold"
+
+    kept = [s.text_frame.text for s in _content_shapes(slide)]
+    assert kept == ["Забота о клиенте"], f"chrome leaked into the content set: {kept}"
