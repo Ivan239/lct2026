@@ -44,14 +44,36 @@ __DESCRIPTION__
 """
 
 
-def _describe_slide(slide_struct):
+def _largest_size_pt(shape):
+    # A picture's "text" is None, not an empty list.
+    sizes = [
+        run["size_pt"] for para in (shape.get("text") or []) for run in para
+        if run.get("size_pt") and (run.get("text") or "").strip()
+    ]
+    return max(sizes) if sizes else None
+
+
+def _describe_slide(slide_struct, slide_size_in=None):
     # Deliberately NO layout name in the description: exporters routinely bind
     # every slide to a layout literally named "TITLE" (seen on a real T-Ж
     # template), and the model anchors on that word over the actual shape
     # structure — a 5-item bullet list was confidently classified "title" with
     # the layout line present and confidently "bullet_list" without it. Same
     # lesson as clustering: layout_name is exporter noise, not signal.
-    lines = [f"Shapes: {len(slide_struct['shapes'])}"]
+    #
+    # Two facts the description used to drop, both decisive and both already in
+    # the struct. Measured on a real customer template (survey-31): its title
+    # slide is one 8.15x3.2in box reading "Employee Short Survey Results" set at
+    # 92pt, plus a small decorative picture — unmistakable to the eye, and
+    # classified "other", which makes the deck's most visible slide unusable.
+    # What the model was given could not distinguish it from a caption: no font
+    # size at all, and a box size with no canvas to measure it against (8.15in
+    # is 61% of a 13.33in slide and 100% of a 8in one). Clustering is not to
+    # blame — that slide is its own cluster, so the classifier judged it alone.
+    lines = []
+    if slide_size_in:
+        lines.append(f'Slide: {slide_size_in["width"]}x{slide_size_in["height"]} in')
+    lines.append(f"Shapes: {len(slide_struct['shapes'])}")
     for shape in slide_struct["shapes"]:
         role = shape.get("placeholder_type") or shape["shape_type"]
         geo = shape["geometry_in"]
@@ -59,7 +81,15 @@ def _describe_slide(slide_struct):
         if shape["text"]:
             flat = " ".join(run["text"] for para in shape["text"] for run in para if run["text"])
             snippet = flat[:80]
-        lines.append(f'- {role} at ({geo["left"]}, {geo["top"]}) size {geo["width"]}x{geo["height"]}: "{snippet}"')
+        # Only when the file states it: Google-Slides exports leave most runs
+        # unsized, and inventing a number there would be worse than silence
+        # (the "title = biggest font" heuristic is blind on those decks — see
+        # _pick_title_shape for what that already costs us).
+        size_pt = _largest_size_pt(shape)
+        font = f", font {size_pt:g}pt" if size_pt else ""
+        lines.append(
+            f'- {role} at ({geo["left"]}, {geo["top"]}) '
+            f'size {geo["width"]}x{geo["height"]}{font}: "{snippet}"')
     return "\n".join(lines)
 
 
@@ -76,13 +106,13 @@ def classify_slide(client, image_path, models=VISION_MODELS):
     return parsed
 
 
-def classify_slide_from_structure(client, slide_struct, models=TEXT_MODELS):
+def classify_slide_from_structure(client, slide_struct, models=TEXT_MODELS, slide_size_in=None):
     """Cheap, image-free classification from the OOXML structure alone (geometry,
     placeholder roles, text). No vision-tier model or image tokens needed."""
     prompt = (
         TEXT_PROMPT_TEMPLATE
         .replace("__ARCHETYPES__", ", ".join(ARCHETYPES))
-        .replace("__DESCRIPTION__", _describe_slide(slide_struct))
+        .replace("__DESCRIPTION__", _describe_slide(slide_struct, slide_size_in))
     )
 
     def call(model):
@@ -153,7 +183,8 @@ def build_archetype_map(client, template_struct, rendered_png_paths=None,
         if cached is not None:
             return cached, True
         try:
-            result = classify_slide_from_structure(client, slides[idx], models=text_models)
+            result = classify_slide_from_structure(
+                client, slides[idx], models=text_models, slide_size_in=slide_size)
             archetype = result["archetype"]
             confident = result.get("confidence") != "low"
         except Exception:

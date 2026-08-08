@@ -5,7 +5,7 @@ over-merge; identical geometry across templates must fingerprint identically
 
 import glob
 
-from conftest import PRESET_A, PRESET_B, SURVEY_69, TEMPLATES_DIR, requires
+from conftest import PRESET_A, PRESET_B, SURVEY_31, SURVEY_69, TEMPLATES_DIR, requires
 
 from design_system.clustering import cluster_slides, slide_features, slide_fingerprint
 from template_parser.parser import extract_template
@@ -50,3 +50,49 @@ def test_identical_geometry_shares_fingerprints():
     # cache key must match slide-for-slide (this is the "second customer with
     # a standard layout costs zero LLM calls" property).
     assert fps[0] == fps[1]
+
+
+@requires(SURVEY_31)
+def test_slide_description_carries_font_size_and_canvas_size():
+    """The classifier judges from this description alone, and it used to drop
+    the two facts that decide "title vs caption". Measured on this real customer
+    template: its opening slide is one 8.15x3.2in box reading "Employee Short
+    Survey Results" — set at 92pt — and it came back "other", which makes the
+    deck's most visible slide unusable. Clustering is not the culprit: that
+    slide is its own cluster, so the classifier judged it on its own.
+
+    A box size means nothing without the canvas (8.15in is 61% of a 13.33in
+    slide and all of an 8in one), so the slide size is stated too."""
+    from design_system.extractor import _describe_slide
+
+    struct = extract_template(SURVEY_31)
+    title = _describe_slide(struct["slides"][0], struct["slide_size_in"])
+    assert "13.33x7.5" in title, title
+    assert "font 92pt" in title, title
+
+    # A content slide's caption sits an order of magnitude lower — that contrast
+    # is the whole point of stating the size.
+    chart = _describe_slide(struct["slides"][4], struct["slide_size_in"])
+    assert "font 40pt" in chart and "font 18pt" in chart, chart
+
+
+@requires(TEMPLATES_DIR)
+def test_description_never_invents_a_font_size():
+    """Google-Slides exports leave most runs unsized, and the "title = biggest
+    font" heuristic is already blind on them. Stating a guessed number here
+    would push that blindness into the classifier too, so sized runs get a font
+    clause and unsized ones get nothing."""
+    import os
+
+    from design_system.extractor import _describe_slide
+
+    mono = os.path.join(TEMPLATES_DIR, "custom_838830368dac3116.pptx")
+    if not os.path.exists(mono):
+        return
+    struct = extract_template(mono)
+    described = _describe_slide(struct["slides"][2], struct["slide_size_in"])
+    shape_lines = [ln for ln in described.splitlines() if ln.startswith("- ")]
+    with_font = [ln for ln in shape_lines if ", font " in ln]
+    assert 0 < len(with_font) < len(shape_lines), (
+        "expected SOME shapes sized and some not on a Google-Slides export")
+    assert all("font 0pt" not in ln and "font Nonept" not in ln for ln in shape_lines)
