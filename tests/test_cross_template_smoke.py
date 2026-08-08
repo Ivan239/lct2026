@@ -213,3 +213,37 @@ def test_numbering_badges_are_not_used_as_list_slots(tmp_path):
     ]
     assert placed, "the bullet text vanished"
     assert placed[0].width / prs.slide_width >= 0.08, "bullet landed in a numbering badge"
+
+
+@pytest.mark.parametrize("template", [TJ_UNIVERSAL, TJ_MONO], ids=["universal", "mono"])
+def test_slots_in_one_row_ship_a_single_font_size(template, tmp_path):
+    """Sibling slots are fitted one box at a time, so a short item keeps the
+    template size while a long neighbour is shrunk — measured on shipped decks,
+    one row came out 8/9/13pt and another 9/11/15pt inside IDENTICAL boxes,
+    which reads as sloppy precisely because the boxes sit side by side.
+
+    The bullets below are deliberately of very different lengths: that is what
+    makes the per-box fitters disagree, and a test with same-length items would
+    pass without the harmonizer existing at all."""
+    from generator.generator import generate
+
+    block = {"type": "bullet_list", "title": "Конкурентоспособность",
+             "bullets": ["Клиентоориентированность", "Стандартизированность", "Взаимодействие"]}
+    out = str(tmp_path / "slots.pptx")
+    generate(template, [(block, 2)], out)
+
+    slide = list(Presentation(out).slides)[0]
+    sizes = {}
+    for shape in slide.shapes:
+        if not shape.has_text_frame:
+            continue
+        text = shape.text_frame.text.strip().replace("\xad", "")
+        if text not in block["bullets"]:
+            continue
+        found = [run.font.size.pt for para in shape.text_frame.paragraphs
+                 for run in para.runs if run.font.size and run.text.strip()]
+        if found:
+            sizes[text] = min(found)
+
+    assert len(sizes) >= 2, f"expected the bullets to land in sibling boxes, got {sizes}"
+    assert len(set(sizes.values())) == 1, f"sibling slots ship different sizes: {sizes}"

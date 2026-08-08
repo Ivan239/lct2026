@@ -822,6 +822,58 @@ def _slot_markers(slide, slot_box):
     return markers
 
 
+def _harmonize_slot_sizes(prs, slide_indices):
+    """Give every slot in a row the same font size, AFTER the final fit pass.
+
+    Each slot is fitted on its own and enforce_text_fits then shrinks each box
+    independently, so a short item keeps the template size while a long
+    neighbour drops — measured on real templates, one row shipped 8/9/13pt and
+    another 9/11/15pt inside identical boxes, which reads as sloppy the moment
+    the items sit side by side. Same argument as harmonize_clone_font_sizes:
+    slot boxes are equal-size by construction (that is how they are detected),
+    so the smallest size has already proved it fits every one of them. Only ever
+    shrinks. Returns (slide_idx, shape_id, new_size_pt) so markers positioned
+    from the old size get re-laid-out, as CLAUDE.md requires of any post-QA
+    resize."""
+    changes = []
+    for slide_idx in slide_indices:
+        slide = prs.slides[slide_idx]
+        # Re-detecting the grid here would miss most rows: _fill_list_slots
+        # physically removes the surplus boxes, so what is left is no longer the
+        # full R×C grid the detector insists on (that is why the T-Zh mono row
+        # stayed 9/11/15pt on the first attempt). Group by box SIZE instead —
+        # equal-size boxes on one slide are the row, however many survived.
+        by_size = {}
+        for shape in _content_text_shapes(slide, set()):
+            if not shape.width or not shape.height or not shape.text_frame.text.strip():
+                continue
+            key = (int(shape.width // _SLOT_ALIGN_TOLERANCE_EMU),
+                   int(shape.height // _SLOT_ALIGN_TOLERANCE_EMU))
+            by_size.setdefault(key, []).append(shape)
+        filled = max(by_size.values(), key=len) if by_size else []
+        if len(filled) < 2:
+            continue
+        sizes = [
+            run.font.size.pt
+            for slot in filled
+            for para in slot.text_frame.paragraphs for run in para.runs
+            if run.font.size and run.text.strip()
+        ]
+        if len(sizes) < 2 or max(sizes) == min(sizes):
+            continue
+        target = min(sizes)
+        for slot in filled:
+            shrank = False
+            for para in slot.text_frame.paragraphs:
+                for run in para.runs:
+                    if run.font.size and run.font.size.pt > target:
+                        run.font.size = Pt(target)
+                        shrank = True
+            if shrank:
+                changes.append((slide_idx, slot.shape_id, target))
+    return changes
+
+
 def _fill_list_slots(slide, slots, texts, claimed_ids, resolver=None):
     """One text per slot box; surplus slot boxes are physically removed along
     with their markers (a blanked box would still hold layout space, and its
@@ -1342,6 +1394,7 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
     # Whatever they shrank gets its marker icons re-laid-out for the new size.
     shrink_fixes = enforce_text_fits(prs, resolver, slide_indices=final_order)
     harmonize_changes = harmonize_clone_font_sizes(prs, fill_groups.values())
+    harmonize_changes += _harmonize_slot_sizes(prs, final_order)
     _realign_icons_after_resize(prs, list(shrink_fixes) + harmonize_changes, resolver=resolver)
 
     _reorder_and_prune_slides(prs, final_order)
