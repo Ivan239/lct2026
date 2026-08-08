@@ -297,3 +297,41 @@ def test_synthesized_title_uses_the_templates_own_size():
     titles = [_max_font_pt(s) for s in prs.slides[idx].shapes
               if s.has_text_frame and "Итоги" in s.text_frame.text]
     assert titles and titles[0] == 51, f"synthesized title shipped at {titles}"
+
+
+@requires(SURVEY_31)
+def test_cover_subtitle_clears_a_title_at_the_templates_own_size():
+    """The cover used a flat 40pt while these templates set theirs at
+    42 / 68 / 34 / 92 / 92. Taking the template's size is the point — and it
+    immediately broke the layout, because the subtitle sat at a hard-coded 60%
+    of the slide height. That was clear of a one-line 40pt title and nothing
+    else: at 88pt the title wrapped to two lines, ending at 5.94in against a
+    subtitle at 4.50in, and the render showed «Итоги внедрения за квартал»
+    printed straight through it.
+
+    Same lesson as iter35: reserve from the real box, never from an offset that
+    happens to work at one size."""
+    from pptx.util import Emu
+
+    from generator.deck_style import apply_observed_style, observe_deck_style
+    from generator.generator import _template_cover_pt
+    from generator.layout_bounds import infer_content_bounds
+    from generator.synthesizer import synthesize_title
+    from template_parser.parser import extract_template, extract_theme
+
+    prs = Presentation(SURVEY_31)
+    assert _template_cover_pt(prs) == 92, "fixture: this deck's cover is 92pt"
+
+    theme = apply_observed_style(extract_theme(SURVEY_31), observe_deck_style(prs))
+    theme["cover_pt"] = _template_cover_pt(prs)
+    idx = synthesize_title(
+        prs, theme, infer_content_bounds(extract_template(SURVEY_31)),
+        {"title": "Платформа Поток", "subtitle": "Итоги внедрения за квартал"})
+
+    boxes = [s for s in prs.slides[idx].shapes
+             if s.has_text_frame and s.text_frame.text.strip()]
+    title = next(s for s in boxes if "Платформа" in s.text_frame.text)
+    subtitle = next(s for s in boxes if "Итоги" in s.text_frame.text)
+    assert int(subtitle.top) >= int(title.top + title.height), (
+        f"subtitle at {Emu(subtitle.top).inches:.2f}in runs into a title ending at "
+        f"{Emu(title.top + title.height).inches:.2f}in")

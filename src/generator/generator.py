@@ -1493,6 +1493,24 @@ def _reorder_and_prune_slides(prs, ordered_slide_indices):
         prs.part.drop_rel(el.get(qn("r:id")))
 
 
+def _template_cover_pt(prs):
+    """The size the template sets its COVER title at, or None.
+
+    Separate from _template_title_pt on purpose: a cover is deliberately louder
+    than a content slide. Measured on slide 0 of the five real templates —
+    42 / 68 / 34 / 92 / 92pt against their content titles of 42 / 51 / 26 / 40 /
+    32 — so a flat 40pt was wrong on four of them, and less than half the
+    designer's size on both survey decks."""
+    slides = list(prs.slides)
+    if not slides:
+        return None
+    title = _pick_title_shape(slides[0], set())
+    if title is None:
+        return None
+    pt = _max_font_pt(title)
+    return round(pt) if pt else None
+
+
 def _template_title_pt(prs):
     """The size the TEMPLATE sets its own titles at, or None.
 
@@ -1568,6 +1586,7 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
                 # Typography scale of THIS template, so a synthesized slide sits
                 # at the deck's own title size instead of a flat 32pt.
                 synth_theme["title_pt"] = _template_title_pt(prs)
+                synth_theme["cover_pt"] = _template_cover_pt(prs)
                 bounds_computed = True
             # Measured background of the ORIGINAL canvas slide (from the
             # render), so the synthesizer can rescue text that would land

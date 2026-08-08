@@ -57,6 +57,7 @@ def _theme_palette(theme):
         # the deck gives no confident answer, and then _add_title's own default
         # stands.
         "title_pt": theme.get("title_pt"),
+        "cover_pt": theme.get("cover_pt"),
     }
 
 
@@ -90,6 +91,9 @@ MIN_FRAME_HEIGHT = int(Inches(0.6))
 
 # Used only when the template's own title size cannot be measured.
 DEFAULT_TITLE_PT = 32
+
+# Used only when the template's own cover size cannot be measured.
+DEFAULT_COVER_PT = 40
 
 
 def _recolor_for_canvas(palette, canvas_bg):
@@ -399,19 +403,40 @@ def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None
     slide, idx, t, _ = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx, canvas_bg=canvas_bg)
     width, height = prs.slide_width, prs.slide_height
 
+    title_text = data.get("title", "")
+    title_width = Emu(int(width * 0.8))
+    # The template's own cover size, capped so a long title cannot be broken
+    # mid-word: at the 92pt these survey decks use, an uncapped base would do
+    # exactly what iter18/iter25 caught on content titles.
+    metrics = _metrics_for(resolver, t["major_font"])
+    cover_pt = cap_size_to_longest_word(
+        title_text, title_width, t.get("cover_pt") or DEFAULT_COVER_PT,
+        metrics=metrics, bold=True)
+
+    # Height from the text, not a fixed 22% of the slide. The subtitle used to
+    # sit at a hard-coded 60% of the slide height, which was clear of a one-line
+    # 40pt title and nothing else: the moment the cover took the template's own
+    # size (88pt on the survey decks) the title wrapped to two lines and the
+    # render showed «Итоги внедрения за квартал» printed straight through it.
+    # Same lesson as iter35 — reserve from the real box, never from an offset
+    # that happens to work at one size.
+    title_h_in = estimate_block_height_in(
+        title_text, Emu(title_width).inches, cover_pt, metrics=metrics) + 0.15
+    title_top = int(height * 0.38)
     title_box = slide.shapes.add_textbox(
-        Emu(int(width * 0.1)), Emu(int(height * 0.38)), Emu(int(width * 0.8)), Emu(int(height * 0.22))
-    )
+        Emu(int(width * 0.1)), Emu(title_top), title_width, Emu(int(Inches(title_h_in))))
     tf = title_box.text_frame
     tf.word_wrap = True
-    tf.text = data.get("title", "")
+    tf.text = title_text
     tf.paragraphs[0].alignment = PP_ALIGN.CENTER
-    _style_paragraph(tf.paragraphs[0], t["major_font"], 40, t["accent"], bold=True)
+    _style_paragraph(tf.paragraphs[0], t["major_font"], cover_pt, t["accent"], bold=True)
 
     subtitle = data.get("subtitle")
     if subtitle:
+        sub_top = min(int(title_top + title_box.height + int(Inches(0.2))),
+                      int(height * 0.88))
         sub_box = slide.shapes.add_textbox(
-            Emu(int(width * 0.15)), Emu(int(height * 0.6)), Emu(int(width * 0.7)), Emu(int(height * 0.12))
+            Emu(int(width * 0.15)), Emu(sub_top), Emu(int(width * 0.7)), Emu(int(height * 0.12))
         )
         stf = sub_box.text_frame
         stf.word_wrap = True
