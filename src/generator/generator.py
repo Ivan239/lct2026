@@ -1,3 +1,5 @@
+from collections import Counter
+
 from pptx import Presentation
 from pptx.enum.dml import MSO_COLOR_TYPE
 from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
@@ -1491,6 +1493,28 @@ def _reorder_and_prune_slides(prs, ordered_slide_indices):
         prs.part.drop_rel(el.get(qn("r:id")))
 
 
+def _template_title_pt(prs):
+    """The size the TEMPLATE sets its own titles at, or None.
+
+    Synthesized slides used a flat 32pt whatever the deck. Measured with the
+    same title picker the rest of the pipeline uses, the real templates sit at
+    42 / 51 / 26 / 40 / 32pt — on T-Zh mono ours came out a third smaller than
+    the designer's, on the study template a fifth larger. Mode, not mean: a
+    designed size repeats across the deck (it equals the median on four of the
+    five), while a one-off display figure does not."""
+    sizes = []
+    for slide in prs.slides:
+        title = _pick_title_shape(slide, set())
+        if title is None:
+            continue
+        pt = _max_font_pt(title)
+        if pt:
+            sizes.append(round(pt))
+    if len(sizes) < 3:
+        return None
+    return Counter(sizes).most_common(1)[0][0]
+
+
 def generate(template_path, plan, out_path, synth_canvas=None, canvas_backgrounds=None):
     """plan: ordered list of (content_block, template_slide_index) — or
     (content_block, SYNTHESIZE) when the matcher found no template slide for that
@@ -1541,6 +1565,9 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
                 # style runs directly and leave theme1.xml at Office defaults) —
                 # synthesized slides follow what the slides actually show.
                 synth_theme = apply_observed_style(theme, observe_deck_style(prs))
+                # Typography scale of THIS template, so a synthesized slide sits
+                # at the deck's own title size instead of a flat 32pt.
+                synth_theme["title_pt"] = _template_title_pt(prs)
                 bounds_computed = True
             # Measured background of the ORIGINAL canvas slide (from the
             # render), so the synthesizer can rescue text that would land

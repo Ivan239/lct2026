@@ -53,6 +53,10 @@ def _theme_palette(theme):
         "accent": theme["palette"].get("accent1") or "#1F497D",
         "text": theme["palette"].get("dk1") or "#000000",
         "bg": theme["palette"].get("lt1"),
+        # Measured from the template (generator._template_title_pt); None when
+        # the deck gives no confident answer, and then _add_title's own default
+        # stands.
+        "title_pt": theme.get("title_pt"),
     }
 
 
@@ -83,6 +87,9 @@ _MIN_CANVAS_CONTRAST = 80
 
 # Below this a placeholder frame is too thin to read as a reserved image area.
 MIN_FRAME_HEIGHT = int(Inches(0.6))
+
+# Used only when the template's own title size cannot be measured.
+DEFAULT_TITLE_PT = 32
 
 
 def _recolor_for_canvas(palette, canvas_bg):
@@ -349,9 +356,10 @@ def _title_fits_one_line(text, width_emu, size_pt, metrics, slack=0.1):
     return metrics.text_width_pt(str(text), size_pt) <= budget_pt
 
 
-def _add_title(slide, bounds, text, font_name, color_hex, size_pt=32, resolver=None):
+def _add_title(slide, bounds, text, font_name, color_hex, size_pt=None, resolver=None):
     """Sized to its actual estimated line count rather than a fixed height, so
     content below it is positioned after wherever the title really ends."""
+    size_pt = size_pt or DEFAULT_TITLE_PT
     width = Emu(bounds["right"] - bounds["left"])
     metrics = _metrics_for(resolver, font_name)
     # Height-only fitting accepts a size at which a long word has no choice but
@@ -418,7 +426,8 @@ def synthesize_bullet_list(prs, theme, bounds_in, data, resolver=None, canvas_id
     slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx, canvas_bg=canvas_bg)
     width = Emu(b["right"] - b["left"])
 
-    title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"], resolver=resolver)
+    title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"],
+                           size_pt=t.get("title_pt"), resolver=resolver)
     content_top = Emu(title_box.top + title_box.height + Emu(int(Inches(0.25))))
 
     bullets = data.get("bullets", [])
@@ -440,7 +449,8 @@ def synthesize_bullet_list(prs, theme, bounds_in, data, resolver=None, canvas_id
 def synthesize_stats_kpi(prs, theme, bounds_in, data, resolver=None, canvas_idx=None, canvas_bg=None):
     slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx, canvas_bg=canvas_bg)
 
-    title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"], resolver=resolver)
+    title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"],
+                           size_pt=t.get("title_pt"), resolver=resolver)
     content_top = Emu(title_box.top + title_box.height + Emu(int(Inches(0.35))))
     # Number box (0.9") + label offset (1.0") + label box (0.8") — fixed layout.
     content_top = _centered_top(content_top, b["bottom"], 1.8,
@@ -470,7 +480,8 @@ def synthesize_two_column_comparison(prs, theme, bounds_in, data, resolver=None,
     slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx, canvas_bg=canvas_bg)
     margin = Emu(int(Inches(0.2)))
 
-    title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"], resolver=resolver)
+    title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"],
+                           size_pt=t.get("title_pt"), resolver=resolver)
     col_top = Emu(title_box.top + title_box.height + Emu(int(Inches(0.3))))
 
     total_width = Emu(b["right"] - b["left"])
@@ -555,7 +566,8 @@ def _add_image_placeholder(slide, left, top, width, height, caption, t):
 
 def synthesize_image_caption(prs, theme, bounds_in, data, resolver=None, canvas_idx=None, canvas_bg=None):
     slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx, canvas_bg=canvas_bg)
-    title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"], resolver=resolver)
+    title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"],
+                           size_pt=t.get("title_pt"), resolver=resolver)
     # Reserve a two-line title's worth of clearance: the frame is large, so any
     # overlap with a title that wrapped to a second line is glaring, and the
     # estimate can under-count lines (renderer wraps ~2-4% earlier).
@@ -568,7 +580,8 @@ def synthesize_image_caption(prs, theme, bounds_in, data, resolver=None, canvas_
     # reserve exactly the title.
     metrics = _metrics_for(resolver, t["major_font"])
     fitted_pt = cap_size_to_longest_word(
-        data.get("title", ""), Emu(b["right"] - b["left"]), 32, metrics=metrics, bold=True)
+        data.get("title", ""), Emu(b["right"] - b["left"]),
+        t.get("title_pt") or DEFAULT_TITLE_PT, metrics=metrics, bold=True)
     if _title_fits_one_line(data.get("title", ""), b["right"] - b["left"], fitted_pt, metrics):
         clearance = int(title_box.height) + int(Inches(0.35))
     else:

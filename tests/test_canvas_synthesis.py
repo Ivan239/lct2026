@@ -260,3 +260,40 @@ def test_canvas_picker_skips_the_templates_readme_page():
     if mono:
         assert len(set(mono.values())) > 1, (
             f"colour rotation collapsed to a single canvas: {mono}")
+
+
+@requires(TJ)
+def test_synthesized_title_uses_the_templates_own_size():
+    """Synthesized slides set their titles at a flat 32pt whatever the deck.
+    Measured with the same title picker the rest of the pipeline uses, the real
+    templates sit at 42 / 51 / 26 / 40 / 32pt — so on T-Zh mono ours came out a
+    third smaller than the designer's, and on the study template a fifth larger.
+
+    Mode, not mean: a designed size repeats across the deck (it equals the
+    median on four of the five templates), a one-off display figure does not."""
+    import os
+
+    from conftest import TEMPLATES_DIR
+    from generator.deck_style import apply_observed_style, observe_deck_style
+    from generator.generator import _max_font_pt, _template_title_pt
+    from generator.layout_bounds import infer_content_bounds
+    from generator.synthesizer import synthesize_bullet_list
+    from template_parser.parser import extract_template, extract_theme
+
+    mono = os.path.join(TEMPLATES_DIR, "custom_838830368dac3116.pptx")
+    if not os.path.exists(mono):
+        return
+
+    assert _template_title_pt(Presentation(mono)) == 51
+    assert _template_title_pt(Presentation(TJ)) == 26, "the study template is SMALLER than 32"
+
+    prs = Presentation(mono)
+    theme = apply_observed_style(extract_theme(mono), observe_deck_style(prs))
+    theme["title_pt"] = _template_title_pt(prs)
+    # A CONTENT slide. The cover (synthesize_title) keeps its own hero scale on
+    # purpose — real covers run to the template's largest size, not its median.
+    idx = synthesize_bullet_list(prs, theme, infer_content_bounds(extract_template(mono)),
+                                 {"title": "Итоги", "bullets": ["Раз", "Два"]})
+    titles = [_max_font_pt(s) for s in prs.slides[idx].shapes
+              if s.has_text_frame and "Итоги" in s.text_frame.text]
+    assert titles and titles[0] == 51, f"synthesized title shipped at {titles}"
