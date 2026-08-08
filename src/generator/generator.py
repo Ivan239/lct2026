@@ -1148,6 +1148,19 @@ def _fill_running_topic(prs, deck_title):
             runs[0].text = topic.upper() if original.isupper() else topic
 
 
+def _is_page_number(text, slide_count):
+    """Not every all-digit box in the chrome band is a page number. The T-Zh
+    universal template carries "2025" in its footer on ten slides, and
+    renumbering rewrote the brand year to "0001", "0002", ... on every slide —
+    caught by the cross-template smoke test. A page number is small: it cannot
+    exceed the deck length, and anything year-sized is furniture."""
+    try:
+        value = int(text)
+    except ValueError:
+        return False
+    return 0 < value <= max(slide_count, 99)
+
+
 def _renumber_static_slide_numbers(prs):
     """A cloned canvas brings the template's own page number with it, so a deck
     whose first slide was cut from template slide 5 opens showing "05". The
@@ -1178,7 +1191,7 @@ def _renumber_static_slide_numbers(prs):
             if len(runs) != 1:
                 continue
             text = runs[0].text.strip()
-            if not text.isdigit():
+            if not text.isdigit() or not _is_page_number(text, len(prs.slides._sldIdLst)):
                 continue
             runs[0].text = str(position).zfill(len(text))
 
