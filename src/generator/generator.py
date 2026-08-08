@@ -512,7 +512,17 @@ def _clear_unclaimed_text(slide, claimed_ids):
     """Any text shape we didn't deliberately fill keeps whatever was in the
     original template slide — for hand-designed decks that's often unrelated
     leftover content (e.g. old survey questions). Blank it out rather than
-    let it leak into the generated deck looking like garbled AI output."""
+    let it leak into the generated deck looking like garbled AI output.
+
+    Tried and reverted: exempting all-digit boxes in the chrome band, so the
+    static page number would survive for _renumber_static_slide_numbers to fix.
+    It resurrected the WRONG numbers. The T-Zh universal grid is 6 items in two
+    rows and the bottom row sits inside the chrome band, so _find_slot_boxes
+    only ever sees the top three; the bottom row's item boxes get blanked here
+    while its badges «02», «04», «06» are chrome-and-all-digit and were spared,
+    then renumbered to the page number — three orphan «01»s floating where a row
+    used to be. Blanking is what was masking that, so the page number has to be
+    CLAIMED by whoever manages it, not exempted by a text heuristic."""
     for shape in _text_shapes(slide):
         if shape.shape_id in claimed_ids:
             continue
@@ -850,36 +860,75 @@ def _harmonize_slot_sizes(prs, slide_indices):
             key = (int(shape.width // _SLOT_ALIGN_TOLERANCE_EMU),
                    int(shape.height // _SLOT_ALIGN_TOLERANCE_EMU))
             by_size.setdefault(key, []).append(shape)
-        filled = max(by_size.values(), key=len) if by_size else []
-        if len(filled) < 2:
-            continue
-        sizes = [
-            run.font.size.pt
-            for slot in filled
-            for para in slot.text_frame.paragraphs for run in para.runs
-            if run.font.size and run.text.strip()
-        ]
-        if len(sizes) < 2 or max(sizes) == min(sizes):
-            continue
-        target = min(sizes)
-        for slot in filled:
-            shrank = False
-            for para in slot.text_frame.paragraphs:
-                for run in para.runs:
-                    if run.font.size and run.font.size.pt > target:
-                        run.font.size = Pt(target)
-                        shrank = True
-            if shrank:
-                changes.append((slide_idx, slot.shape_id, target))
+        # Every same-size group, not just the biggest one. Taking the largest
+        # was wrong as soon as slot numbering badges survived the fill: a
+        # three-item row then has THREE item boxes and THREE badge boxes, and
+        # the badges won the tie, leaving the items ragged again (caught by
+        # test_slots_in_one_row_ship_a_single_font_size). A slide can also hold
+        # two rows of different-size slots, and both deserve harmonising.
+        for group in by_size.values():
+            if len(group) < 2:
+                continue
+            sizes = [
+                run.font.size.pt
+                for slot in group
+                for para in slot.text_frame.paragraphs for run in para.runs
+                if run.font.size and run.text.strip()
+            ]
+            if len(sizes) < 2 or max(sizes) == min(sizes):
+                continue
+            target = min(sizes)
+            for slot in group:
+                shrank = False
+                for para in slot.text_frame.paragraphs:
+                    for run in para.runs:
+                        if run.font.size and run.font.size.pt > target:
+                            run.font.size = Pt(target)
+                            shrank = True
+                if shrank:
+                    changes.append((slide_idx, slot.shape_id, target))
     return changes
+
+
+def _renumber_slot_badge(marker, position):
+    """Renumber a list item's numbering badge to its position in the SHIPPED
+    list, keeping the template's zero padding («01», not «1»).
+
+    Needed because a grid is not always numbered in reading order: the T-Zh
+    universal slide is 6 items in a 3x2 grid numbered down the columns, so its
+    top row reads «01 03 05». That is correct for six items and looks like a
+    bug for three — which is what a three-bullet deck ships. Same narrowness as
+    _renumber_static_slide_numbers: a single run, digits only, so a dot glyph or
+    a lettered marker is left exactly as the designer drew it."""
+    if not marker.has_text_frame:
+        return
+    runs = [r for p in marker.text_frame.paragraphs for r in p.runs]
+    if len(runs) != 1:
+        return
+    text = runs[0].text.strip()
+    if not text.isdigit():
+        return
+    runs[0].text = str(position).zfill(len(text))
 
 
 def _fill_list_slots(slide, slots, texts, claimed_ids, resolver=None):
     """One text per slot box; surplus slot boxes are physically removed along
     with their markers (a blanked box would still hold layout space, and its
     orphaned dot is the exact artifact this path exists to prevent)."""
+    position = 1
     for slot, text in zip(slots, texts):
         _set_run_text(slot, text, claimed_ids, resolver=resolver)
+        # A numbering badge beside a FILLED slot is the template's furniture,
+        # not stale content — but _clear_unclaimed_text blanks every text shape
+        # nobody claimed, so the T-Zh grid shipped bare items where the template
+        # reads «01 Название пункта … 06». Claiming them is exact: the same
+        # _slot_markers that DELETES a badge next to a removed slot keeps the
+        # one next to a filled slot, with no new heuristic about what a number
+        # on a slide means.
+        for marker in _slot_markers(slide, slot):
+            claimed_ids.add(marker.shape_id)
+            _renumber_slot_badge(marker, position)
+        position += 1
     for surplus in slots[len(texts):]:
         for marker in _slot_markers(slide, surplus):
             marker._element.getparent().remove(marker._element)

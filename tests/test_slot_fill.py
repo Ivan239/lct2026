@@ -6,7 +6,9 @@ spacers (ragged marL, collapsed rhythm), and clearing-but-keeping the tail
 left enough phantom lines to overfill the box — the renderer then silently
 autofit-shrank the text, dragging bullet icons off their rows."""
 
-from conftest import SURVEY_69, requires
+import pytest
+
+from conftest import SURVEY_69, TJ_MONO, TJ_UNIVERSAL, requires
 
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -85,3 +87,27 @@ def test_icons_track_spacer_rhythm():
     # spans content + spacer.
     assert max(pitches) - min(pitches) < Inches(0.05)
     assert pitches[0] > Inches(0.5)
+
+
+@pytest.mark.parametrize("template", [TJ_UNIVERSAL, TJ_MONO], ids=["universal", "mono"])
+def test_slot_numbering_badges_survive_and_renumber(template, tmp_path):
+    """The template numbers its list items («01 Название пункта … 06»), but
+    _clear_unclaimed_text blanks every text shape nobody claimed, so generated
+    decks shipped bare items with the numbering silently erased — brand
+    furniture, gone.
+
+    Renumbering matters as much as keeping them: a grid is not always numbered
+    in reading order. The T-Zh universal slide is a 3x2 grid numbered DOWN the
+    columns, so its top row reads «01 03 05» — right for six items, and a
+    visible bug for the three a bullet deck actually ships."""
+    block = {"type": "bullet_list", "title": "Итоги квартала",
+             "bullets": ["Забота о клиенте", "Единый стандарт", "Быстрый отклик"]}
+    out = str(tmp_path / "badges.pptx")
+    G.generate(template, [(block, 2)], out)
+
+    slide = list(Presentation(out).slides)[0]
+    badges = sorted(
+        shape.text_frame.text.strip() for shape in slide.shapes
+        if shape.has_text_frame and shape.text_frame.text.strip().isdigit()
+    )
+    assert badges == ["01", "02", "03"], f"numbering shipped as {badges}"
