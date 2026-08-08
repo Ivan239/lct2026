@@ -822,3 +822,48 @@ def test_chrome_is_not_judged_as_body_copy(tmp_path):
 
     kept = [s.text_frame.text for s in _content_shapes(slide)]
     assert kept == ["Забота о клиенте"], f"chrome leaked into the content set: {kept}"
+
+
+def _deck_with_margins(tmp_path, margin_in, stray_in=None):
+    """A deck whose boxes all sit at `margin_in`, optionally with one box shoved
+    to `stray_in`. Painted directly — no LibreOffice, no generator."""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Inches(10), Inches(5.63)
+    for n in range(3):
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        for row in range(3):
+            box = slide.shapes.add_textbox(
+                Inches(margin_in), Inches(1 + row), Inches(4), Inches(0.6))
+            box.text_frame.text = f"Пункт {n}{row}"
+            box.text_frame.paragraphs[0].runs[0].font.size = Pt(18)
+    if stray_in is not None:
+        slide = prs.slides[0]
+        box = slide.shapes.add_textbox(Inches(stray_in), Inches(4.5), Inches(4), Inches(0.6))
+        box.text_frame.text = "Уехал к краю"
+        box.text_frame.paragraphs[0].runs[0].font.size = Pt(18)
+    path = str(tmp_path / f"margins-{margin_in}-{stray_in}.pptx")
+    prs.save(path)
+    return path
+
+
+def test_safe_area_respects_the_decks_own_margin(tmp_path):
+    """A fixed "2% of the slide" safe area penalises a designer who chose a
+    tighter one. The T-Zh mono template sets content at 0.19-0.20in on a 10in
+    slide — 1.9% — so nine boxes were reported outside the safe area for doing
+    exactly what the template does everywhere, and the deck scored 91.2 instead
+    of 97.5.
+
+    A margin the deck REPEATS is a decision; a single box shoved towards the
+    edge is not, and must still be caught."""
+    from evaluation.deterministic import evaluate
+
+    tight = _deck_with_margins(tmp_path, 0.19)          # 1.9%, under the flat cut
+    assert "0 боксов" in evaluate(tight)["dop_safe_margins"]["detail"], (
+        evaluate(tight)["dop_safe_margins"]["detail"])
+
+    strays = _deck_with_margins(tmp_path, 0.19, stray_in=0.05)
+    detail = evaluate(strays)["dop_safe_margins"]["detail"]
+    assert detail.startswith("1 "), f"the stray box was not caught: {detail}"

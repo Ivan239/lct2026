@@ -17,9 +17,10 @@ floor.
 """
 
 import re
+from collections import Counter
 
 from pptx import Presentation
-from pptx.util import Emu
+from pptx.util import Emu, Inches
 
 from fonts.metrics import FontResolver
 from generator.generator import _pick_body_shape, _pick_title_shape
@@ -114,6 +115,43 @@ def _content_shapes(slide):
     height = slide_height(slide)
     return [s for s in slide.shapes
             if _is_content_shape(s) and not is_chrome_shape(s, height)]
+
+
+_MARGIN_BUCKET_EMU = int(Emu(int(Inches(0.05))))
+
+
+def _designed_margins(slides, W, H):
+    """The margins the DECK itself keeps, as fractions of the slide.
+
+    A fixed "2% of the slide" safe area penalises a designer who chose a tighter
+    one: the T-Zh mono template sets its content at 0.19-0.20in on a 10in slide
+    — 1.9% — so nine boxes were reported outside the safe area for doing exactly
+    what the template does everywhere. Measured across the corpus, every deck's
+    smallest offset equals its 10th percentile, i.e. boxes sit ON a designed
+    margin rather than scattering towards the edge (mono 1.9%, the others
+    2.5-3.9%).
+
+    So take the MODE of the offsets, bucketed to 0.05in: a margin the deck
+    repeats is a decision, while a single box shoved to the edge stays a lone
+    value and is still caught."""
+    sides = {"l": [], "t": [], "r": [], "b": []}
+    for slide in slides:
+        for s in _content_shapes(slide):
+            if s.left is None or s.top is None or not s.width or not s.height:
+                continue
+            sides["l"].append(s.left)
+            sides["t"].append(s.top)
+            sides["r"].append(W - (s.left + s.width))
+            sides["b"].append(H - (s.top + s.height))
+    out = {}
+    for side, values in sides.items():
+        if not values:
+            out[side] = None
+            continue
+        buckets = Counter(max(0, v) // _MARGIN_BUCKET_EMU for v in values)
+        out[side] = (buckets.most_common(1)[0][0] * _MARGIN_BUCKET_EMU) / (
+            W if side in ("l", "r") else H)
+    return out
 
 
 def _shape_runs(shape):
@@ -225,6 +263,7 @@ def evaluate(pptx_path, slide_roles=None):
     all_slide_texts = []
     all_line_sets = []  # per-slide set of normalized content lines, for near-dup
 
+    designed = _designed_margins(slides, W, H)
     for slide in slides:
         content = _content_shapes(slide)
         title_shape = _pick_title_shape(slide, set())
@@ -251,8 +290,16 @@ def evaluate(pptx_path, slide_roles=None):
             if (l < -OOB_TOLERANCE_FRACTION * W or t < -OOB_TOLERANCE_FRACTION * H
                     or r > W * (1 + OOB_TOLERANCE_FRACTION) or b > H * (1 + OOB_TOLERANCE_FRACTION)):
                 oob += 1
-            if (l < EDGE_SAFE_FRACTION * W or t < EDGE_SAFE_FRACTION * H
-                    or r > W * (1 - EDGE_SAFE_FRACTION) or b > H * (1 - EDGE_SAFE_FRACTION)):
+            # Tighter than BOTH the generic safe area and the deck's own
+            # designed margin — a box level with the rest of the deck is not a
+            # margin violation, however tight that margin is.
+            def _tight(offset, limit, designed):
+                bound = limit if designed is None else min(limit, designed)
+                return offset < bound
+            if (_tight(l / W, EDGE_SAFE_FRACTION, designed["l"])
+                    or _tight(t / H, EDGE_SAFE_FRACTION, designed["t"])
+                    or _tight((W - r) / W, EDGE_SAFE_FRACTION, designed["r"])
+                    or _tight((H - b) / H, EDGE_SAFE_FRACTION, designed["b"])):
                 near_edge += 1
 
         # orphan last lines across content paragraphs
@@ -346,7 +393,8 @@ def evaluate(pptx_path, slide_roles=None):
     # dop_safe_margins
     scores["dop_safe_margins"] = {
         "score": _rate_to_score(rate_over_content("near_edge")),
-        "detail": f"{sum(p['near_edge'] for p in per_slide)} боксов ближе {EDGE_SAFE_FRACTION:.0%} к краю",
+        "detail": (f"{sum(p['near_edge'] for p in per_slide)} боксов ближе к краю, "
+                   f"чем {EDGE_SAFE_FRACTION:.0%} и чем собственное поле деки"),
     }
     # dop_noise
     noisy = sum(1 for p in per_slide if p["n_content"] > NOISE_SHAPE_COUNT)
