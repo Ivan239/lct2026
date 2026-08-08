@@ -640,3 +640,42 @@ def test_image_placeholder_never_leaves_the_slide():
     assert top + height <= int(bounds["bottom"]), "frame must stay inside the content bounds"
     assert top + height <= int(title.top), "frame must not run into the title"
     assert S.MIN_FRAME_HEIGHT > 0
+
+
+def test_running_topic_slot_is_filled_not_guessed():
+    """"ТЕМА ПРЕЗЕНТАЦИИ" ships on 11 of 12 slides of a real template and went
+    out visible on every generated slide. It is the designer's placeholder for
+    the one thing we know, so it gets the deck's topic. Everything else in the
+    chrome band is left alone: "repeats across slides" does NOT mean placeholder
+    ("2025" repeats 10 times and is real furniture)."""
+    from pptx.util import Inches
+
+    from generator.generator import _fill_running_topic
+
+    prs = Presentation()
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    header = slide.shapes.add_textbox(Inches(0.4), Inches(0.2), Inches(3), Inches(0.3))
+    header.text_frame.text = "ТЕМА ПРЕЗЕНТАЦИИ"
+    year = slide.shapes.add_textbox(Inches(8.5), Inches(0.2), Inches(1), Inches(0.3))
+    year.text_frame.text = "2025"
+    comment = slide.shapes.add_textbox(Inches(6), Inches(7.0), Inches(2), Inches(0.3))
+    comment.text_frame.text = "КОММЕНТАРИЙ"
+    body = slide.shapes.add_textbox(Inches(1), Inches(3), Inches(5), Inches(2))
+    body.text_frame.text = "ТЕМА ПРЕЗЕНТАЦИИ"  # same words, but real content -> untouched
+
+    _fill_running_topic(prs, "Платформа «Поток»")
+
+    assert header.text_frame.text == "ПЛАТФОРМА «ПОТОК»"   # design's caps kept
+    assert year.text_frame.text == "2025"                  # real furniture untouched
+    assert comment.text_frame.text == "КОММЕНТАРИЙ"        # unanswerable slot left alone
+    assert body.text_frame.text == "ТЕМА ПРЕЗЕНТАЦИИ"      # outside the chrome band
+
+    # an overlong topic is trimmed on a word boundary, not left to overflow
+    prs2 = Presentation()
+    s2 = prs2.slides.add_slide(prs2.slide_layouts[6])
+    h2 = s2.shapes.add_textbox(Inches(0.4), Inches(0.2), Inches(3), Inches(0.3))
+    h2.text_frame.text = "тема презентации"
+    _fill_running_topic(prs2, "Облачная платформа для сквозной аналитики продаж среднего бизнеса")
+    from generator.generator import MAX_RUNNING_HEADER_CHARS
+    assert len(h2.text_frame.text) <= MAX_RUNNING_HEADER_CHARS
+    assert not h2.text_frame.text.endswith(" ")

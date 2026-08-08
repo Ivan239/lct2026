@@ -1105,6 +1105,49 @@ def _realign_icons_after_resize(prs, changes, resolver=None):
         _reposition_bullet_icons(icons, shape, texts, max(sizes), metrics=metrics)
 
 
+# Running-header slots that literally ask for the deck's topic. Measured across
+# the real templates: "ТЕМА ПРЕЗЕНТАЦИИ" ships on 11 of 12 slides of the T-Zh
+# teaching template and 10 of 12 of the universal one, i.e. it is the designer's
+# placeholder for the very thing we know — and it went out visible on every
+# generated slide. An exact-match allowlist, deliberately: "repeats across
+# slides" does NOT separate a prompt from real furniture ("2025" also repeats 10
+# times and must stay), so nothing is guessed at. Slots we cannot answer
+# ("КОММЕНТАРИЙ", "Название пункта") are left alone rather than blanked — an
+# empty box would just leave a hole in the designer's grid.
+TOPIC_SLOT_PROMPTS = {
+    "тема презентации",
+    "название презентации",
+    "тема доклада",
+}
+MAX_RUNNING_HEADER_CHARS = 42
+
+
+def _fill_running_topic(prs, deck_title):
+    """Replace the template's topic placeholder with the deck's real topic.
+
+    Runs after _reorder_and_prune_slides like the renumbering, and follows the
+    same conservative shape: chrome-band shapes only, single run only, exact
+    match against the allowlist. Keeps the design's capitalisation — these slots
+    are set in caps on purpose."""
+    if not deck_title:
+        return
+    for slide in prs.slides:
+        height = prs.slide_height
+        for shape in slide.shapes:
+            if not shape.has_text_frame or not is_chrome_shape(shape, height):
+                continue
+            runs = [r for p in shape.text_frame.paragraphs for r in p.runs]
+            if len(runs) != 1:
+                continue
+            original = runs[0].text.strip()
+            if original.lower() not in TOPIC_SLOT_PROMPTS:
+                continue
+            topic = deck_title.strip()
+            if len(topic) > MAX_RUNNING_HEADER_CHARS:
+                topic = topic[:MAX_RUNNING_HEADER_CHARS].rsplit(" ", 1)[0].rstrip(".,;:—- ")
+            runs[0].text = topic.upper() if original.isupper() else topic
+
+
 def _renumber_static_slide_numbers(prs):
     """A cloned canvas brings the template's own page number with it, so a deck
     whose first slide was cut from template slide 5 opens showing "05". The
@@ -1255,6 +1298,7 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
 
     _reorder_and_prune_slides(prs, final_order)
     _renumber_static_slide_numbers(prs)
+    _fill_running_topic(prs, next((b.get("title") for b, _ in plan if b.get("title")), None))
     prs.save(out_path)
     # Package-integrity gate (plan 9.6): three separate "PowerPoint wants to
     # repair this" incidents proved that rendering fine in LibreOffice is no
