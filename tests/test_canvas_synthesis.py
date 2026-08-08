@@ -133,3 +133,42 @@ def test_canvas_placeholders_are_blanked_but_managed_chrome_is_kept():
     ]
     assert not any("КОММЕНТАРИЙ" in t for t in after), f"placeholder shipped: {after}"
     assert any(t.isdigit() for t in after), f"the page number was wiped too: {after}"
+
+
+@requires(TJ)
+def test_image_frame_does_not_reserve_room_for_a_wrap_that_cannot_happen():
+    """The clearance under the title carries a safety margin because the height
+    estimate can under-count lines (the renderer wraps 2-4% earlier than the
+    metrics predict). That margin has to be EARNED: a title that provably fits
+    on one line was still given the two-line floor, leaving 0.47in of dead band
+    between the heading and the frame — a visible hole on the render.
+
+    Both directions are checked: the short title gets exactly the gap, the long
+    one keeps its reserve and the frame never climbs into it."""
+    from pptx.util import Emu, Inches
+
+    from fonts.metrics import FontResolver
+    from generator.deck_style import apply_observed_style, observe_deck_style
+    from generator.layout_bounds import infer_content_bounds
+    from generator.synthesizer import IMAGE_PLACEHOLDER_NAME, synthesize_image_caption
+    from template_parser.parser import extract_template, extract_theme
+
+    bounds = infer_content_bounds(extract_template(TJ))
+    gaps = {}
+    for label, title in (
+        ("short", "Платформа в работе"),
+        ("long", "Как мы перестроили процесс согласования отчётности в компании"),
+    ):
+        prs = Presentation(TJ)
+        theme = apply_observed_style(extract_theme(TJ), observe_deck_style(prs))
+        idx = synthesize_image_caption(
+            prs, theme, bounds, {"title": title, "image": "дашборд"},
+            resolver=FontResolver(TJ, extract_theme(TJ)), canvas_idx=8)
+        shapes = prs.slides[idx].shapes
+        frame = next(s for s in shapes if s.name == IMAGE_PLACEHOLDER_NAME)
+        title_box = next(s for s in shapes if s.name.startswith("TextBox"))
+        gaps[label] = int(frame.top) - int(title_box.top + title_box.height)
+
+    assert 0 < gaps["short"] <= int(Inches(0.4)), (
+        f"dead band under a title that cannot wrap: {Emu(gaps['short']).inches:.2f}in")
+    assert gaps["long"] > 0, "the frame climbed into a title that did wrap"

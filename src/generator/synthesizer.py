@@ -277,6 +277,20 @@ def _centered_top(content_top, bounds_bottom, est_height_in):
     return Emu(int(content_top) + (avail - est) // 2)
 
 
+def _title_fits_one_line(text, width_emu, size_pt, metrics, slack=0.1):
+    """True when the title provably fits on ONE line with room to spare.
+
+    Callers reserve space under the title, and the reserve carries a safety
+    margin because the height estimate can under-count: the renderer wraps 2-4%
+    earlier than fontTools metrics predict (CLAUDE.md). That margin is only
+    earned when a wrap is actually possible. With no metrics we cannot tell, so
+    we say no and the caller keeps its reserve."""
+    if metrics is None or not text or not width_emu:
+        return False
+    budget_pt = Emu(width_emu).inches * 72 * (1 - slack)
+    return metrics.text_width_pt(str(text), size_pt) <= budget_pt
+
+
 def _add_title(slide, bounds, text, font_name, color_hex, size_pt=32, resolver=None):
     """Sized to its actual estimated line count rather than a fixed height, so
     content below it is positioned after wherever the title really ends."""
@@ -481,11 +495,23 @@ def _add_image_placeholder(slide, left, top, width, height, caption, t):
 def synthesize_image_caption(prs, theme, bounds_in, data, resolver=None, canvas_idx=None, canvas_bg=None):
     slide, idx, t, b = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=canvas_idx, canvas_bg=canvas_bg)
     title_box = _add_title(slide, b, data.get("title", ""), t["major_font"], t["accent"], resolver=resolver)
-    # Reserve at least a two-line title's worth of clearance: the frame is large,
-    # so any overlap with a title that wrapped to a second line is glaring (the
-    # estimate can under-count lines — renderer wraps ~2-4% earlier). max() below
-    # keeps the frame clear even when title_box.height only budgeted one line.
-    clearance = max(int(title_box.height), int(Inches(1.3))) + int(Inches(0.35))
+    # Reserve a two-line title's worth of clearance: the frame is large, so any
+    # overlap with a title that wrapped to a second line is glaring, and the
+    # estimate can under-count lines (renderer wraps ~2-4% earlier).
+    #
+    # But that reserve has to be EARNED. Measured on the T-Zh study canvas, a
+    # title that provably cannot wrap («Платформа в работе», 32pt, 7.20in box)
+    # still got the floor: 1.65in reserved against a 0.83in title, i.e. 0.47in
+    # of dead band between the heading and the frame — visible on the render as
+    # a hole under the title. Where a wrap is impossible with 10% to spare,
+    # reserve exactly the title.
+    metrics = _metrics_for(resolver, t["major_font"])
+    fitted_pt = cap_size_to_longest_word(
+        data.get("title", ""), Emu(b["right"] - b["left"]), 32, metrics=metrics, bold=True)
+    if _title_fits_one_line(data.get("title", ""), b["right"] - b["left"], fitted_pt, metrics):
+        clearance = int(title_box.height) + int(Inches(0.35))
+    else:
+        clearance = max(int(title_box.height), int(Inches(1.3))) + int(Inches(0.35))
     below_top = int(title_box.top) + clearance
     width = Emu(b["right"] - b["left"])
 
