@@ -218,3 +218,45 @@ def test_synthesized_block_steps_around_the_canvas_decor():
                 f"{box.text_frame.text.strip()[:24]!r} at "
                 f"{Emu(top).inches:.2f}-{Emu(bottom).inches:.2f}in runs across decor at "
                 f"{Emu(art_top).inches:.2f}-{Emu(art_bottom).inches:.2f}in")
+
+
+def test_canvas_picker_skips_the_templates_readme_page():
+    """"Fewest text boxes" picks the blandest slide, and the blandest slide is
+    sometimes the template's own instructions page. The T-Zh universal deck ends
+    with a «Технический слайд» telling whoever uses the template which fonts to
+    download; it has 3 boxes and no furniture, the branded candidates have 5 and
+    9, so the <=3 cut left it as the only option and ALL THREE synthesized
+    slides were cloned from it — bare white pages on a template whose identity
+    is black with yellow artwork.
+
+    Its background is (248,248,248) on exactly one slide of the deck, so
+    singleton backgrounds are dropped first. The rotation must survive that:
+    filtering to the deck's MAJORITY background instead was tried and reverted,
+    because it collapsed T-Zh mono from alternating blue/white to white only."""
+    import glob
+    import json
+    import os
+
+    from common.synthesis import SYNTHESIZE
+    from design_system.style_profile import build_measured_profile
+    from evaluation.loop import _synth_canvas_hints
+
+    def hints_for(tid, model, positions=4):
+        cache = f"output/loop/{model}/{tid}/archetypes.json"
+        pngs = sorted(glob.glob(f"output/loop/{model}/{tid}/rendered/*.png"))
+        if not os.path.exists(cache) or not pngs:
+            return None
+        archetypes = {int(k): v for k, v in json.load(open(cache)).items()}
+        profile = build_measured_profile(pngs, archetypes)
+        plan = [({"type": "bullet_list"}, SYNTHESIZE)] * positions
+        return _synth_canvas_hints(f"output/templates/{tid}.pptx", plan, profile)
+
+    universal = hints_for("custom_47dfd8952eb47583", "GigaChat-3-Ultra")
+    if universal:
+        assert 11 not in universal.values(), (
+            f"the readme page is being cloned as a canvas: {universal}")
+
+    mono = hints_for("custom_838830368dac3116", "GigaChat-2")
+    if mono:
+        assert len(set(mono.values())) > 1, (
+            f"colour rotation collapsed to a single canvas: {mono}")

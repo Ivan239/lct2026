@@ -11,6 +11,7 @@ provenance the loop needs to answer "do we already have one from this LLM?".
 """
 
 import json
+from collections import Counter
 import os
 import re
 import time
@@ -155,13 +156,33 @@ def _synth_canvas_hints(source_pptx, plan, profile):
             candidates.append((len(content_text_shapes(slide)), idx, profile["backgrounds"].get(idx)))
         if not candidates:
             return {}
-        eligible = [c for c in candidates if c[0] <= 3] or sorted(candidates)[:3]
+        # "Fewest text boxes" alone picks the blandest slide in the file, and the
+        # blandest slide is often not a design slide at all: the T-Zh universal
+        # template ends with a «Технический слайд» — instructions for whoever
+        # uses the template ("we used Roboto and Inter, download them here") —
+        # carrying 3 boxes and no furniture. The branded candidates carry 5 and
+        # 9, so the <=3 cut left the readme as the ONLY option and all three
+        # synthesized slides were cloned from it: bare white pages on a template
+        # whose identity is black with yellow artwork.
+        #
+        # The tell is its background. That page is (248,248,248) and belongs to
+        # exactly ONE slide, while every design slide in the deck is (0,0,0), so
+        # drop singleton-background candidates before the furniture-only cut.
+        # Tried filtering to the deck's MAJORITY background instead and reverted
+        # it inside this iteration: that collapses every canvas to one colour and
+        # kills the template's own rotation (T-Zh mono went from alternating
+        # blue/white to white everywhere). The singleton test is precise — mono
+        # is genuinely half white, so its white stays eligible.
+        deck_bg = Counter(bg for bg in profile["backgrounds"].values() if bg is not None)
+        on_brand = [c for c in candidates if c[2] is None or deck_bg[c[2]] > 1] or candidates
+        eligible = [c for c in on_brand if c[0] <= 3] or sorted(on_brand)[:3]
         hints = {}
         for position, (_, slide_idx) in enumerate(plan):
             if slide_idx != SYNTHESIZE:
                 continue
             target = targets[position] if targets else None
-            best = min(eligible, key=lambda c: (0 if target is not None and c[2] == target else 1, c[0], c[1]))
+            best = min(eligible, key=lambda c: (
+                0 if target is not None and c[2] == target else 1, c[0], c[1]))
             hints[position] = best[1]
         return hints
     except Exception as e:  # noqa: BLE001 — best-effort, falls back to from-scratch
