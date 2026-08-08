@@ -106,9 +106,14 @@ def test_slot_numbering_badges_survive_and_renumber(template, tmp_path):
     G.generate(template, [(block, 2)], out)
 
     slide = list(Presentation(out).slides)[0]
+    # Only the item badges: the brand year and the page number are all-digit
+    # chrome too, and both legitimately survive the fill now. Selecting by box
+    # size rather than by the marker name we set keeps the test honest —
+    # measured, badges are 0.26in wide, the year 0.99in, the page number 1.17in.
     badges = sorted(
         shape.text_frame.text.strip() for shape in slide.shapes
         if shape.has_text_frame and shape.text_frame.text.strip().isdigit()
+        and shape.width and shape.width < Inches(0.5)
     )
     assert badges == ["01", "02", "03"], f"numbering shipped as {badges}"
 
@@ -126,8 +131,13 @@ def test_full_grid_numbers_every_item_in_reading_order(tmp_path):
     G.generate(TJ_UNIVERSAL, [(block, 2)], out)
 
     slide = list(Presentation(out).slides)[0]
+    # Only the item badges: the brand year and the page number are all-digit
+    # chrome too, and both legitimately survive the fill now. Selecting by box
+    # size rather than by the marker name we set keeps the test honest —
+    # measured, badges are 0.26in wide, the year 0.99in, the page number 1.17in.
     badges = sorted(
         shape.text_frame.text.strip() for shape in slide.shapes
         if shape.has_text_frame and shape.text_frame.text.strip().isdigit()
+        and shape.width and shape.width < Inches(0.5)
     )
     assert badges == ["01", "02", "03", "04", "05", "06"], f"numbering: {badges}"

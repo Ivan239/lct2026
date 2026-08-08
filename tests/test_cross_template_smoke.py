@@ -247,3 +247,60 @@ def test_slots_in_one_row_ship_a_single_font_size(template, tmp_path):
 
     assert len(sizes) >= 2, f"expected the bullets to land in sibling boxes, got {sizes}"
     assert len(set(sizes.values())) == 1, f"sibling slots ship different sizes: {sizes}"
+
+
+@requires(TJ_UNIVERSAL)
+def test_chrome_furniture_managed_by_later_passes_survives_the_blanking(tmp_path):
+    """_clear_unclaimed_text runs BEFORE _renumber_static_slide_numbers and
+    _fill_running_topic, and it blanked every unclaimed text shape — so both of
+    those passes were dead code on the native fill path, looking for their
+    shapes and finding empty boxes. Measured before the fix: every generated
+    deck shipped with a completely empty chrome band on every template — no page
+    number, no brand year, no running topic."""
+    from generator.generator import generate
+
+    plan = [
+        ({"type": "title", "title": "Платформа Поток", "subtitle": "Отчёт за квартал"}, 0),
+        ({"type": "bullet_list", "title": "Итоги квартала",
+          "bullets": ["Забота о клиенте", "Единый стандарт", "Быстрый отклик"]}, 2),
+    ]
+    out = str(tmp_path / "chrome.pptx")
+    generate(TJ_UNIVERSAL, plan, out)
+
+    prs = Presentation(out)
+    chrome = [
+        shape.text_frame.text.strip()
+        for slide in prs.slides for shape in slide.shapes
+        if shape.has_text_frame and is_chrome_shape(shape, prs.slide_height)
+        and shape.text_frame.text.strip()
+    ]
+    assert "2025" in chrome, f"the brand year was wiped: {chrome}"
+    assert any("ПОТОК" in text for text in chrome), (
+        f"the running topic was not filled with the deck's own name: {chrome}")
+    assert not any("ТЕМА ПРЕЗЕНТАЦИИ" in text for text in chrome), (
+        f"the template's placeholder shipped verbatim: {chrome}")
+
+
+@requires(TJ_MONO)
+def test_static_page_number_survives_and_matches_position(tmp_path):
+    """The T-Zh mono page number is a plain text box (Google Slides export, no
+    SLIDE_NUMBER placeholder). Blanked before renumbering, it shipped empty;
+    kept, it must still say the slide's real position, not the template's."""
+    from generator.generator import generate
+
+    plan = [
+        ({"type": "title", "title": "Платформа Поток", "subtitle": "Отчёт"}, 0),
+        ({"type": "bullet_list", "title": "Итоги",
+          "bullets": ["Забота о клиенте", "Единый стандарт", "Быстрый отклик"]}, 2),
+    ]
+    out = str(tmp_path / "pages.pptx")
+    generate(TJ_MONO, plan, out)
+
+    prs = Presentation(out)
+    slide = list(prs.slides)[1]
+    numbers = [
+        shape.text_frame.text.strip() for shape in slide.shapes
+        if shape.has_text_frame and is_chrome_shape(shape, prs.slide_height)
+        and shape.text_frame.text.strip().isdigit()
+    ]
+    assert numbers == ["02"], f"page number on slide 2 shipped as {numbers}"

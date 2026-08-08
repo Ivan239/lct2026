@@ -509,23 +509,48 @@ def _set_paragraph_texts(shape, texts, claimed_ids, resolver=None, allow_center=
     return font_size.pt if font_size is not None else (reference.font.size.pt if reference and reference.font.size else None)
 
 
-def _clear_unclaimed_text(slide, claimed_ids):
+def _is_managed_chrome(shape, slide_height):
+    """Chrome text that a LATER pass owns and will rewrite, so blanking it here
+    destroys the thing that pass exists to fix.
+
+    Measured on the real templates: every generated deck shipped with its chrome
+    band completely empty — no page numbers, no brand year, no running topic —
+    because this blanking runs first. Both _renumber_static_slide_numbers
+    (iter19) and _fill_running_topic (iter23) were therefore dead code on the
+    native fill path: they looked for their shapes and found empty boxes.
+
+    The predicate is not a new guess about what a number means; it is exactly
+    those two passes' own tests, so nothing is spared that nobody rewrites.
+    A placeholder with no owner («КОММЕНТАРИЙ») keeps being blanked — shipping
+    the literal word would be worse than shipping nothing."""
+    if not is_chrome_shape(shape, slide_height):
+        return False
+    runs = [r for p in shape.text_frame.paragraphs for r in p.runs]
+    if len(runs) != 1:
+        return False
+    text = runs[0].text.strip()
+    return text.isdigit() or text.lower() in TOPIC_SLOT_PROMPTS
+
+
+def _clear_unclaimed_text(slide, claimed_ids, slide_height=None):
     """Any text shape we didn't deliberately fill keeps whatever was in the
     original template slide — for hand-designed decks that's often unrelated
     leftover content (e.g. old survey questions). Blank it out rather than
     let it leak into the generated deck looking like garbled AI output.
 
-    Tried and reverted: exempting all-digit boxes in the chrome band, so the
-    static page number would survive for _renumber_static_slide_numbers to fix.
-    It resurrected the WRONG numbers. The T-Zh universal grid is 6 items in two
-    rows and the bottom row sits inside the chrome band, so _find_slot_boxes
-    only ever sees the top three; the bottom row's item boxes get blanked here
-    while its badges «02», «04», «06» are chrome-and-all-digit and were spared,
-    then renumbered to the page number — three orphan «01»s floating where a row
-    used to be. Blanking is what was masking that, so the page number has to be
-    CLAIMED by whoever manages it, not exempted by a text heuristic."""
+    Exception: chrome a later pass manages (_is_managed_chrome).
+
+    History worth keeping, because the first attempt at this was WRONG: iter29
+    spared all-digit chrome and resurrected three orphan «01»s on the T-Zh
+    universal grid. Its bottom row sits inside the chrome band, _find_slot_boxes
+    could not see those slots, so their badges were spared as page numbers and
+    renumbered. Blanking had been masking that defect. It is safe now only
+    because iter30 made such rows detectable — so their badges are claimed and
+    named — and that is verified by measurement, not assumed."""
     for shape in _text_shapes(slide):
         if shape.shape_id in claimed_ids:
+            continue
+        if slide_height is not None and _is_managed_chrome(shape, slide_height):
             continue
         for p in shape.text_frame.paragraphs:
             for run in p.runs:
@@ -1512,7 +1537,7 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
         slide = prs.slides[slide_idx]
         claimed_ids = set()
         FILLERS[block["type"]](slide, block, claimed_ids, resolver=resolver)
-        _clear_unclaimed_text(slide, claimed_ids)
+        _clear_unclaimed_text(slide, claimed_ids, prs.slide_height)
         _remove_orphan_marker_columns(slide)
         _remove_oversized_pictures(slide, prs.slide_width, prs.slide_height)
         final_order.append(slide_idx)
