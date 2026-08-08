@@ -302,11 +302,18 @@ def evaluate(pptx_path, slide_roles=None):
                     or _tight((H - b) / H, EDGE_SAFE_FRACTION, designed["b"])):
                 near_edge += 1
 
-        # orphan last lines across content paragraphs
+        # orphan last lines across content paragraphs — the TITLE excluded.
+        # A widow is a body-copy defect. A display title wrapping to two lines
+        # with one word on the second is normal typography, and these templates
+        # do it themselves: T-Zh mono's own title slide reads «Заголовок /
+        # слайда», and our «Платформа / Поток» at 68pt was the single orphan the
+        # whole corpus produced — looked at on the render, it is the template's
+        # own treatment, not a defect.
+        title_id = title_shape.shape_id if title_shape is not None else None
         orphan = 0
         multiline = 0
         for s in content:
-            if not s.width:
+            if not s.width or s.shape_id == title_id:
                 continue
             size_pt = _shape_max_size(s)
             fn = next((r.font.name for r in _shape_runs(s) if r.font.name), None)

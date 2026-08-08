@@ -867,3 +867,48 @@ def test_safe_area_respects_the_decks_own_margin(tmp_path):
     strays = _deck_with_margins(tmp_path, 0.19, stray_in=0.05)
     detail = evaluate(strays)["dop_safe_margins"]["detail"]
     assert detail.startswith("1 "), f"the stray box was not caught: {detail}"
+
+
+def test_orphan_check_ignores_the_title_but_still_catches_body_widows(tmp_path):
+    """A widow is a body-copy defect. A display title wrapping to two lines with
+    one word on the second is normal typography, and these templates do it
+    themselves — T-Zh mono's own title slide reads «Заголовок / слайда». Our
+    «Платформа / Поток» at 68pt was the single orphan the whole corpus produced,
+    and on the render it is plainly the template's treatment, not a defect: it
+    alone dragged that deck from 99.4 to 97.5.
+
+    Dropping the title from the count must not disarm the check, so the same
+    fixture carries a real body widow."""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+
+    from evaluation.deterministic import evaluate
+
+    def deck(with_body_widow):
+        prs = Presentation()
+        prs.slide_width, prs.slide_height = Inches(10), Inches(5.63)
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        title = slide.shapes.add_textbox(Inches(0.5), Inches(0.4), Inches(7), Inches(2))
+        title.text_frame.word_wrap = True
+        title.text_frame.text = "Платформа Поток"
+        title.text_frame.paragraphs[0].runs[0].font.size = Pt(68)
+        title.text_frame.paragraphs[0].runs[0].font.name = "Arial"
+        if with_body_widow:
+            body = slide.shapes.add_textbox(Inches(0.5), Inches(3), Inches(4), Inches(1.5))
+            body.text_frame.word_wrap = True
+            # Tail chosen by measurement, not by eye: short tails ("и", "да")
+            # still fit on the previous line, so they produce no widow at all.
+            body.text_frame.text = (
+                "Сокращение времени на подготовку регулярной управленческой "
+                "отчётности процесс")
+            body.text_frame.paragraphs[0].runs[0].font.size = Pt(18)
+            body.text_frame.paragraphs[0].runs[0].font.name = "Arial"
+        path = str(tmp_path / f"orphan-{with_body_widow}.pptx")
+        prs.save(path)
+        return path
+
+    title_only = evaluate(deck(False))["dop_orphans"]["detail"]
+    assert title_only.startswith("0 "), f"the title was counted as a widow: {title_only}"
+
+    with_body = evaluate(deck(True))["dop_orphans"]["detail"]
+    assert with_body.startswith("1 "), f"a real body widow was missed: {with_body}"
