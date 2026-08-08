@@ -81,6 +81,9 @@ def _resolve_bounds(prs, bounds_in):
 # why that veto isn't enough on cloned canvases.
 _MIN_CANVAS_CONTRAST = 80
 
+# Below this a placeholder frame is too thin to read as a reserved image area.
+MIN_FRAME_HEIGHT = int(Inches(0.6))
+
 
 def _recolor_for_canvas(palette, canvas_bg):
     """deck_style already vetoes an unreadable text colour, but it compares
@@ -386,11 +389,35 @@ def synthesize_image_caption(prs, theme, bounds_in, data, resolver=None, canvas_
     # estimate can under-count lines — renderer wraps ~2-4% earlier). max() below
     # keeps the frame clear even when title_box.height only budgeted one line.
     clearance = max(int(title_box.height), int(Inches(1.3))) + int(Inches(0.35))
-    top = Emu(int(title_box.top) + clearance)
+    below_top = int(title_box.top) + clearance
     width = Emu(b["right"] - b["left"])
-    height = Emu(max(int(Inches(1.6)), int(b["bottom"]) - int(top)))
+
+    # Put the frame wherever there is actually room. Reserving a fixed minimum
+    # height below the title used to run it straight off the page: on a 5.62"
+    # T-Zh slide whose title sits low, the frame started at 5.38" and ended at
+    # 6.98" — over three quarters of it off-slide, and the render showed a
+    # sliver of dashed border at the bottom edge. Some templates put the title
+    # low by design, so the band ABOVE it can be the larger one; pick whichever
+    # is bigger and never cross the content bounds.
+    gap = int(Inches(0.35))
+    below = int(b["bottom"]) - below_top
+    above = (int(title_box.top) - gap) - int(b["top"])
+    if above > below:
+        top, height = int(b["top"]), above
+    else:
+        top, height = below_top, below
+
+    # Never force a minimum height: doing that just moves the problem from
+    # "frame hangs off the slide" to "frame sits on top of the title" — both
+    # tried on the same T-Zh slide, both visibly wrong. The frame gets exactly
+    # the band that is free, however short that is; below MIN_FRAME_HEIGHT
+    # there is nothing worth drawing and the slide keeps just its title.
+    height = min(height, int(b["bottom"]) - top)
+    if height < MIN_FRAME_HEIGHT:
+        return idx
+
     caption = data.get("image") or data.get("caption") or "иллюстрация по теме слайда"
-    _add_image_placeholder(slide, b["left"], top, width, height, caption, t)
+    _add_image_placeholder(slide, b["left"], Emu(top), width, Emu(height), caption, t)
     return idx
 
 

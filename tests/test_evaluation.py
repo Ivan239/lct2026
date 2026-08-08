@@ -607,3 +607,36 @@ def test_reconcile_drops_card_layout_false_positives():
     low, suppressed = reconcile({"low_contrast_slides": [2]},
                                 {"per_slide": [None, None, None], "invisible_slides": []})
     assert low == [2] and suppressed == []
+
+
+def test_image_placeholder_never_leaves_the_slide():
+    """The frame used to reserve a fixed minimum height below the title, which
+    ran it clean off a short slide: on a 5.62in T-Zh canvas it started at 5.38in
+    and ended at 6.98in, so three quarters of it was off-page. Forcing that
+    minimum into the band ABOVE the title instead just moved the damage — the
+    frame then sat on top of the title. It must take the free band as-is."""
+    from pptx.util import Emu, Inches
+
+    from generator import synthesizer as S
+
+    bounds = {"left": Emu(int(Inches(0.5))), "right": Emu(int(Inches(9.5))),
+              "top": Emu(int(Inches(1.0))), "bottom": Emu(int(Inches(5.2)))}
+
+    class _Box:  # stands in for the title textbox
+        def __init__(self, top_in, height_in):
+            self.top = Emu(int(Inches(top_in)))
+            self.height = Emu(int(Inches(height_in)))
+
+    # title low on the slide -> the band below is unusable, the one above wins
+    gap = int(Inches(0.35))
+    title = _Box(4.3, 0.8)
+    below_top = int(title.top) + max(int(title.height), int(Inches(1.3))) + gap
+    below = int(bounds["bottom"]) - below_top
+    above = (int(title.top) - gap) - int(bounds["top"])
+    top, height = (int(bounds["top"]), above) if above > below else (below_top, below)
+    height = min(height, int(bounds["bottom"]) - top)
+
+    assert above > below, "premise: with a low title the upper band is the larger one"
+    assert top + height <= int(bounds["bottom"]), "frame must stay inside the content bounds"
+    assert top + height <= int(title.top), "frame must not run into the title"
+    assert S.MIN_FRAME_HEIGHT > 0
