@@ -33,6 +33,7 @@ from template_parser.parser import extract_template, extract_theme
 # many existing call sites and tests stable.
 from generator.slide_kit import (
     content_text_shapes as _content_text_shapes,
+    slide_height as _slide_height,
     slide_width as _slide_width,
     is_boring_placeholder as _is_boring_placeholder,
     is_chrome_shape,
@@ -762,10 +763,21 @@ def _find_slot_boxes(slide, claimed_ids):
     # 8pt stack of three-letter fragments. Measured across the corpus, real list
     # grids are 18-31% of the slide width and the badge row is 3%, so the cut is
     # nowhere near either side.
+    # Chrome is NOT filtered out of the candidates here, unlike everywhere else.
+    # The chrome test is "short box hugging a slide edge band", and the T-Zh
+    # universal list is 6 items in a 3x2 grid whose BOTTOM ROW ends 0.32in inside
+    # that band — so three of the six cells read as furniture, get_capacity
+    # reported 3, and half the designed layout could never be used. A box in a
+    # COMPLETE grid alongside non-chrome cells is content whatever band it sits
+    # in: page numbers and header strips do not form grids with content boxes.
+    # The all-chrome guard below keeps a genuine repeated footer strip out.
+    # Measured over all five real templates: this changes exactly one slide
+    # (universal #2, 3 -> 6) and creates no all-chrome grid anywhere.
     min_slot_width = _slide_width(slide) * _MIN_SLOT_WIDTH_FRACTION
     boxes = [
-        s for s in _content_text_shapes(slide, claimed_ids)
-        if s.left is not None and s.top is not None and s.width and s.height
+        s for s in _text_shapes(slide)
+        if s.shape_id not in claimed_ids
+        and s.left is not None and s.top is not None and s.width and s.height
         and s.width >= min_slot_width
     ]
     by_shape = {}
@@ -793,11 +805,18 @@ def _find_slot_boxes(slide, claimed_ids):
                 break
             cells[cell] = b
         else:
-            if len(group) == len(xs) * len(ys) and len(group) > len(best):
-                best = sorted(group, key=lambda b: (
-                    int(b.top // _SLOT_ALIGN_TOLERANCE_EMU),
-                    int(b.left // _SLOT_ALIGN_TOLERANCE_EMU),
-                ))
+            if len(group) != len(xs) * len(ys) or len(group) <= len(best):
+                continue
+            # A grid made ENTIRELY of chrome is furniture, not a list — a footer
+            # strip repeated across the slide would otherwise become fill
+            # targets now that chrome is allowed in as a candidate.
+            height = _slide_height(slide)
+            if all(is_chrome_shape(b, height) for b in group):
+                continue
+            best = sorted(group, key=lambda b: (
+                int(b.top // _SLOT_ALIGN_TOLERANCE_EMU),
+                int(b.left // _SLOT_ALIGN_TOLERANCE_EMU),
+            ))
     return best
 
 
@@ -890,6 +909,14 @@ def _harmonize_slot_sizes(prs, slide_indices):
     return changes
 
 
+# Marks a list-item numbering badge as OURS. _renumber_static_slide_numbers
+# rewrites any chrome all-digit box to the page number, and once the universal
+# grid's bottom row became fillable its badges «02»/«04»/«06» qualified — three
+# of them were rewritten to «01». Claiming only protects a shape from
+# _clear_unclaimed_text; this survives to the end of the pipeline.
+SLOT_BADGE_NAME = "SlotBadge"
+
+
 def _renumber_slot_badge(marker, position):
     """Renumber a list item's numbering badge to its position in the SHIPPED
     list, keeping the template's zero padding («01», not «1»).
@@ -909,6 +936,7 @@ def _renumber_slot_badge(marker, position):
     if not text.isdigit():
         return
     runs[0].text = str(position).zfill(len(text))
+    marker.name = SLOT_BADGE_NAME
 
 
 def _fill_list_slots(slide, slots, texts, claimed_ids, resolver=None):
@@ -1367,6 +1395,8 @@ def _renumber_static_slide_numbers(prs):
         for shape in slide.shapes:
             if not shape.has_text_frame or not is_chrome_shape(shape, height):
                 continue
+            if shape.name == SLOT_BADGE_NAME:
+                continue  # a list item's badge, numbered by position, not a page
             if shape.is_placeholder:
                 try:
                     # A real slide-number placeholder renumbers itself.

@@ -4,7 +4,7 @@
 2. Paragraph count was reported without capping by physical icon markers ->
    plans asked for more items than there are icons to point at them."""
 
-from conftest import SURVEY_31, TJ_MONO, TJ_TEMPLATE, requires
+from conftest import SURVEY_31, TJ_MONO, TJ_TEMPLATE, TJ_UNIVERSAL, requires
 
 from pptx import Presentation
 
@@ -51,3 +51,29 @@ def test_item_char_budget_is_learned_from_the_templates_own_sample():
         f"a prose box must not get the same budget as a one-line slot: {roomy} vs {tight}")
 
     assert get_item_char_budget(list(mono.slides)[2], "stats_kpi") is None
+
+
+@requires(TJ_UNIVERSAL)
+def test_grid_row_inside_the_chrome_band_still_counts_as_slots():
+    """The chrome test is "short box hugging a slide edge band", and the T-Zh
+    universal list is 6 items in a 3x2 grid whose BOTTOM ROW ends 0.32in inside
+    that band. Three of the six cells therefore read as furniture, capacity came
+    back 3, and half the designed layout could never be used — on a template
+    whose whole point is that layout.
+
+    A box in a COMPLETE grid alongside non-chrome cells is content whatever band
+    it sits in: page numbers and header strips do not form grids with content
+    boxes. Measured over all five real templates, admitting chrome into slot
+    detection changes exactly this one slide and creates no all-chrome grid."""
+    from generator.generator import _find_slot_boxes, get_capacity
+    from generator.slide_kit import is_chrome_shape
+
+    prs = Presentation(TJ_UNIVERSAL)
+    slide = list(prs.slides)[2]
+    assert get_capacity(slide, "bullet_list") == 6
+
+    slots = _find_slot_boxes(slide, set())
+    assert any(is_chrome_shape(s, prs.slide_height) for s in slots), (
+        "the bottom row is what this test is about — if nothing here is "
+        "chrome-classified the fixture changed and the test proves nothing")
+    assert not all(is_chrome_shape(s, prs.slide_height) for s in slots)

@@ -111,3 +111,23 @@ def test_slot_numbering_badges_survive_and_renumber(template, tmp_path):
         if shape.has_text_frame and shape.text_frame.text.strip().isdigit()
     )
     assert badges == ["01", "02", "03"], f"numbering shipped as {badges}"
+
+
+@requires(TJ_UNIVERSAL)
+def test_full_grid_numbers_every_item_in_reading_order(tmp_path):
+    """Six items in the 3x2 grid must read 01..06 down the page. The bottom
+    row's badges live in the chrome band, where _renumber_static_slide_numbers
+    rewrites any all-digit box to the PAGE number — it turned «04»/«05»/«06»
+    into three «01»s until badges we manage started carrying a marker name."""
+    block = {"type": "bullet_list", "title": "Итоги квартала",
+             "bullets": ["Забота о клиенте", "Единый стандарт", "Быстрый отклик",
+                         "Прозрачный отчёт", "Гибкий тариф", "Поддержка 24/7"]}
+    out = str(tmp_path / "grid6.pptx")
+    G.generate(TJ_UNIVERSAL, [(block, 2)], out)
+
+    slide = list(Presentation(out).slides)[0]
+    badges = sorted(
+        shape.text_frame.text.strip() for shape in slide.shapes
+        if shape.has_text_frame and shape.text_frame.text.strip().isdigit()
+    )
+    assert badges == ["01", "02", "03", "04", "05", "06"], f"numbering: {badges}"
