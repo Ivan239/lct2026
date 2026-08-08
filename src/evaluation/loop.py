@@ -240,11 +240,26 @@ def run_iteration(client, model, source_pptx, brief, source_name=None, out_root=
     look_dir = os.path.join(t["workdir"], "decks", f"look_deck_{ts}")
     result = evaluate_deck(out_pptx, brief, slide_roles=slide_roles,
                            render_dir=look_dir, label=f"{safe_model(model)}_{ts}")
+    # How much of the TEMPLATE the deck actually got to use. Worth surfacing
+    # every run: on the two real customer decks the answer is "almost none" and
+    # nothing said so. 58% of survey-31 and 62% of survey-69 are forced to
+    # "other" because they are built around a chart (a big stale-data picture),
+    # so the matcher has barely anything native to offer and nearly every slide
+    # is synthesized on a cloned canvas. That is by design — someone else's
+    # numbers must not ride along — but a deck that is 90% synthesized is a
+    # different product from one that reuses the designer's layouts, and the
+    # loop should not have to rediscover which one it is looking at.
+    native = sum(1 for _, idx in plan if idx != SYNTHESIZE)
+    offered = len({s["idx"] for fam in t["spec"]["families"] for s in fam["slides"]})
     return {
         "model": model,
         "source_name": source_name,
         "deck": out_pptx,
         "n_slides": len(plan),
+        "native_slides": native,
+        "synth_slides": len(plan) - native,
+        "template_offered": offered,
+        "template_total": len(t["archetype_map"]),
         "skipped": skipped,
         "evaluation": result,
         "template_meta": t["meta"],

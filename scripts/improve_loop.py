@@ -130,6 +130,9 @@ def main():
     ev = result["evaluation"]
     print("\n" + format_report(ev))
     print(f"\nSlides: {result['n_slides']}  Skipped: {len(result['skipped'])}")
+    print(f"Из шаблона: {result['native_slides']} нативных / "
+          f"{result['synth_slides']} синтезированных;  "
+          f"шаблон предлагает {result['template_offered']} слайдов из {result['template_total']}")
     print(f"Deck:   {result['deck']}")
     print(f"Eval:   {ev['_json_path']}")
 
