@@ -221,6 +221,7 @@ def evaluate_declared_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATI
 BOX_INSET = 0.04          # trim the box border: rounded corners/edges of art bleed in
 MIN_BOX_PIXELS = 200      # below this the crop is too small to cluster reliably
 MAX_INK_SHARE = 0.45      # ink above this means the modal colour IS the text
+MIN_BG_SHARE = 0.5        # below this the box has no background — it is on a picture
 
 
 def _box_pixels(img, rect, size):
@@ -243,7 +244,17 @@ def _box_contrast(pixels):
         return None
     quant = [_quantize(p) for p in pixels]
     counts = Counter(quant)
-    bg = counts.most_common(1)[0][0]
+    bg, bg_n = counts.most_common(1)[0]
+    if bg_n / len(quant) < MIN_BG_SHARE:
+        # The box has no background — it is sitting on a PICTURE, and the modal
+        # colour is just the picture's most common shade. This does not merely
+        # blind the check, it makes it confidently wrong: on a synthesized slide
+        # whose white text landed across two stock photos, the right column came
+        # back at a healthy 7.40 — measured between the photo's black trees and
+        # its pink sky, nothing to do with our text. Measured separation is wide:
+        # 98 real text boxes across four decks sit at 0.70-0.99 modal share
+        # (median 0.92), while those two photo-backed boxes are 0.02 and 0.34.
+        return None
     ink = [p for p in quant if _dist(p, bg) > INK_DISTANCE]
     if not ink or len(ink) / len(quant) > MAX_INK_SHARE:
         # No glyphs found, or the box is mostly "ink" — which means the modal

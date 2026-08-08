@@ -757,3 +757,35 @@ def test_boxed_contrast_stays_silent_when_the_box_is_mostly_ink(tmp_path):
     solid = list(Image.new("RGB", (40, 40), (10, 10, 10)).getdata())
     assert _box_contrast(solid) is None          # no ink at all
     assert _box_contrast(solid[:10]) is None     # too few pixels to cluster
+
+
+def test_a_box_sitting_on_a_photo_gets_no_verdict():
+    """Text over a picture has no background, and measuring it anyway is not
+    merely blind — it is confidently wrong. On a synthesized slide whose white
+    text landed across two stock photos, the right column came back at a healthy
+    7.40: measured between the photo's black trees and its pink sky, nothing to
+    do with our text at all.
+
+    The fixture mirrors what makes that case slip through: a photo's background
+    is not ONE colour but a spread of near shades, so no quantized bucket
+    dominates, while a large dark region reads as a clean "ink" cluster. The
+    tell is how much of the crop the modal colour holds — measured across 98
+    real text boxes on four decks it is 0.70-0.99 (median 0.92), and the two
+    photo-backed boxes were 0.02 and 0.34."""
+    from PIL import Image
+    from evaluation.contrast import _box_contrast, _quantize
+
+    # 60% "sky" spread over three neighbouring shades (none dominant), 40%
+    # "trees" — a textbook ink cluster that the old code happily measured.
+    sky = [(208, 128, 176), (200, 120, 168), (216, 136, 184)]
+    photo = [sky[i % 3] for i in range(1200)] + [(0, 0, 0)] * 800
+    assert _box_contrast(photo) is None, "a photo-backed box must not get a ratio"
+
+    # A flat card with glyphs on it still measures, and reports the ink.
+    flat = list(Image.new("RGB", (40, 40), (160, 224, 192)).getdata())
+    for i in range(300):
+        flat[i] = (0, 0, 0)
+    measured = _box_contrast(flat)
+    assert measured is not None
+    ratio, ink, bg = measured
+    assert _quantize(bg) == _quantize((160, 224, 192)) and ratio > 10
