@@ -124,3 +124,61 @@ def test_year_sized_furniture_survives_renumbering(template, tmp_path):
     }
     for year in years:
         assert year in produced, f"furniture {year!r} was renumbered away"
+
+
+# Deliberately long Russian compounds: the short strings in PLAN never stress the
+# fitters, so an invariant checked against them guards nothing. These are the
+# words that actually broke — "Конкурентоспособность" split mid-letter in a 32pt
+# synthesized title on two real templates, and a long deck title split inside the
+# running header the topic-fill writes.
+HARD_PLAN = [
+    ({"type": "title", "title": "Высокопроизводительная инфраструктура",
+      "subtitle": "Автоматизированное прогнозирование"}, SYNTHESIZE),
+    ({"type": "bullet_list", "title": "Конкурентоспособность",
+      "bullets": ["Клиентоориентированность", "Стандартизированность"]}, SYNTHESIZE),
+    ({"type": "two_column_comparison", "title": "Сопоставление",
+      "left_heading": "Несогласованность", "left_points": ["Труднодоступность информации"],
+      "right_heading": "Централизованность", "right_points": ["Взаимозаменяемость данных"]}, SYNTHESIZE),
+]
+
+
+@pytest.mark.parametrize("template", [
+    pytest.param(TJ_TEMPLATE, id="tj-teaching", marks=requires(TJ_TEMPLATE)),
+    pytest.param(TJ_MONO, id="tj-mono", marks=requires(TJ_MONO)),
+    pytest.param(TJ_UNIVERSAL, id="tj-universal", marks=requires(TJ_UNIVERSAL)),
+    pytest.param(SURVEY_31, id="survey-31", marks=requires(SURVEY_31)),
+])
+def test_no_word_is_wider_than_its_box(template, tmp_path):
+    """No text may be placed at a size where its longest word cannot fit — that
+    is precisely when the renderer breaks a word mid-letter."""
+    from fonts.metrics import FontResolver
+    from generator.generator import generate
+    from generator.text_fit import horizontal_margins_in
+    from template_parser.parser import extract_theme
+
+    source = Presentation(template)
+    canvas_count = len(source.slides._sldIdLst)
+    hints = {position: position % canvas_count for position in range(len(HARD_PLAN))}
+    out = str(tmp_path / "hard.pptx")
+    generate(template, HARD_PLAN, out, synth_canvas=hints)
+
+    prs = Presentation(out)
+    resolver = FontResolver(out, extract_theme(out))
+    offenders = []
+    for position, slide in enumerate(prs.slides, start=1):
+        for shape in slide.shapes:
+            if not shape.has_text_frame or not shape.width:
+                continue
+            budget_pt = max(1.0, (Emu(shape.width).inches - horizontal_margins_in(shape)) * 72)
+            for para in shape.text_frame.paragraphs:
+                for run in para.runs:
+                    if not run.text.strip() or not run.font.size:
+                        continue
+                    metrics = resolver.metrics_for(run.font.name) if run.font.name else None
+                    if metrics is None:
+                        continue
+                    for word in run.text.split():
+                        if metrics.text_width_pt(word, run.font.size.pt) > budget_pt:
+                            offenders.append((position, word, round(run.font.size.pt)))
+                            break
+    assert not offenders, f"words wider than their box (renderer will split them): {offenders[:4]}"

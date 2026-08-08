@@ -190,6 +190,11 @@ def _add_title(slide, bounds, text, font_name, color_hex, size_pt=32, resolver=N
     content below it is positioned after wherever the title really ends."""
     width = Emu(bounds["right"] - bounds["left"])
     metrics = _metrics_for(resolver, font_name)
+    # Height-only fitting accepts a size at which a long word has no choice but
+    # to break mid-letter — "Конкурентоспособность" came out split at 32pt on two
+    # real templates. iter18 capped the comparison columns for exactly this; the
+    # title needs the same guard, and it is the most visible text on the slide.
+    size_pt = cap_size_to_longest_word(text, width, size_pt, metrics=metrics, bold=True)
     height_in = estimate_block_height_in(text, Emu(width).inches, size_pt, metrics=metrics) + 0.25
     box = slide.shapes.add_textbox(bounds["left"], bounds["top"], width, Emu(int(Inches(height_in))))
     tf = box.text_frame

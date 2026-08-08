@@ -1122,7 +1122,7 @@ TOPIC_SLOT_PROMPTS = {
 MAX_RUNNING_HEADER_CHARS = 42
 
 
-def _fill_running_topic(prs, deck_title):
+def _fill_running_topic(prs, deck_title, resolver=None):
     """Replace the template's topic placeholder with the deck's real topic.
 
     Runs after _reorder_and_prune_slides like the renumbering, and follows the
@@ -1145,7 +1145,28 @@ def _fill_running_topic(prs, deck_title):
             topic = deck_title.strip()
             if len(topic) > MAX_RUNNING_HEADER_CHARS:
                 topic = topic[:MAX_RUNNING_HEADER_CHARS].rsplit(" ", 1)[0].rstrip(".,;:—- ")
-            runs[0].text = topic.upper() if original.isupper() else topic
+            topic = topic.upper() if original.isupper() else topic
+            # Trimming by character count is not enough: a header box is small
+            # and one long word can still be wider than it, which the renderer
+            # then breaks mid-letter ("ВЫСОКОПРОИЗВОДИТЕЛЬНАЯ" in a 128pt-wide
+            # box). If even the first word does not fit, keep the template's own
+            # placeholder rather than shipping a broken one.
+            if not _fits_box_width(topic, shape, runs[0], resolver):
+                continue
+            runs[0].text = topic
+
+
+def _fits_box_width(text, shape, run, resolver):
+    """True when every word of `text` fits the shape's usable width at the run's
+    own font size — i.e. the renderer will not have to break a word mid-letter."""
+    if not shape.width:
+        return True
+    metrics = resolver.metrics_for(run.font.name) if resolver and run.font.name else None
+    if metrics is None:
+        return True  # no metrics available: do not block on a guess
+    size_pt = run.font.size.pt if run.font.size else 12.0
+    budget_pt = max(1.0, (Emu(shape.width).inches - horizontal_margins_in(shape)) * 72)
+    return all(metrics.text_width_pt(word, size_pt) <= budget_pt for word in text.split())
 
 
 def _is_page_number(text, slide_count):
@@ -1311,7 +1332,8 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
 
     _reorder_and_prune_slides(prs, final_order)
     _renumber_static_slide_numbers(prs)
-    _fill_running_topic(prs, next((b.get("title") for b, _ in plan if b.get("title")), None))
+    _fill_running_topic(prs, next((b.get("title") for b, _ in plan if b.get("title")), None),
+                        resolver=resolver)
     prs.save(out_path)
     # Package-integrity gate (plan 9.6): three separate "PowerPoint wants to
     # repair this" incidents proved that rendering fine in LibreOffice is no
