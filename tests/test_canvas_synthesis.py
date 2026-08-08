@@ -90,3 +90,46 @@ def test_image_frame_survives_a_narrow_canvas_and_clears_its_chrome():
         f"frame runs into the canvas footer: ends at "
         f"{Emu(frame.top + frame.height).inches:.2f}in, footer starts at "
         f"{Emu(lowest_allowed).inches:.2f}in")
+
+
+@requires(TJ)
+def test_canvas_placeholders_are_blanked_but_managed_chrome_is_kept():
+    """A clone keeps the whole footer band, and nothing on this path blanked it:
+    «КОММЕНТАРИЙ» shipped verbatim under EVERY synthesized slide of this deck.
+    The native fill path has always cleared exactly this class of text.
+
+    The split matters as much as the clearing — the page number and the running
+    topic slot are owned by later passes (iter31) and must survive, or this fix
+    just re-breaks what that one repaired."""
+    from generator.deck_style import apply_observed_style, observe_deck_style
+    from generator.layout_bounds import infer_content_bounds
+    from generator.slide_kit import is_chrome_shape
+    from generator.synthesizer import synthesize_image_caption
+    from template_parser.parser import extract_template, extract_theme
+
+    prs = Presentation(TJ)
+    theme = apply_observed_style(extract_theme(TJ), observe_deck_style(prs))
+    bounds = infer_content_bounds(extract_template(TJ))
+
+    # Slide 8 carries all three: the topic slot, a page number and the
+    # ownerless «КОММЕНТАРИЙ» — the split this test is about.
+    canvas = prs.slides[8]
+    before = [
+        s.text_frame.text.strip() for s in canvas.shapes
+        if s.has_text_frame and is_chrome_shape(s, prs.slide_height)
+        and s.text_frame.text.strip()
+    ]
+    assert any("КОММЕНТАРИЙ" in t for t in before), (
+        "fixture changed: this canvas is supposed to carry the placeholder")
+    assert any(t.isdigit() for t in before), (
+        "fixture changed: this canvas is supposed to carry a page number")
+
+    idx = synthesize_image_caption(
+        prs, theme, bounds, {"title": "Платформа", "image": "дашборд"}, canvas_idx=8)
+    after = [
+        s.text_frame.text.strip() for s in prs.slides[idx].shapes
+        if s.has_text_frame and is_chrome_shape(s, prs.slide_height)
+        and s.text_frame.text.strip()
+    ]
+    assert not any("КОММЕНТАРИЙ" in t for t in after), f"placeholder shipped: {after}"
+    assert any(t.isdigit() for t in after), f"the page number was wiped too: {after}"

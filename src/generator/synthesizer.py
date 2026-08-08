@@ -163,6 +163,39 @@ def _clip_to_canvas_chrome(bounds, slide, slide_height):
     return dict(bounds, top=Emu(top), bottom=Emu(bottom))
 
 
+def _blank_ownerless_chrome(slide, slide_height):
+    """Clear the canvas's leftover chrome placeholders.
+
+    A clone keeps the whole footer/header band, and nothing on this path ever
+    blanked it — so «КОММЕНТАРИЙ» shipped verbatim in the footer of EVERY
+    synthesized slide of the T-Zh study deck, and the universal template's
+    stranded «Название пункта» row and the mono deck's «Расскажем, что такое
+    проект…» rode along the same way. The native fill path has always blanked
+    exactly this class of text; the clone path simply never got the same pass.
+
+    _is_managed_chrome is the same predicate iter31 used to decide what a LATER
+    pass owns: the page number, the brand year, the running topic slot. Those
+    stay, and _fill_running_topic then writes the deck's real name into the
+    slot. Everything else in the band is a template placeholder with no owner.
+
+    Multi-run digit boxes (the survey decks' page numbers) are not "managed" and
+    so are cleared: _renumber_static_slide_numbers requires a single run and
+    cannot fix them, and a blank corner beats confidently showing page 62."""
+    from generator.generator import _is_managed_chrome
+    from generator.slide_kit import is_chrome_shape
+
+    for shape in slide.shapes:
+        if not shape.has_text_frame or not shape.text_frame.text.strip():
+            continue
+        if not is_chrome_shape(shape, slide_height):
+            continue
+        if _is_managed_chrome(shape, slide_height):
+            continue
+        for para in shape.text_frame.paragraphs:
+            for run in para.runs:
+                run.text = ""
+
+
 def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None):
     """Adds a new slide (appended at the end of prs.slides) and returns
     (slide, index, palette, bounds).
@@ -209,6 +242,7 @@ def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None)
                 _resolve_bounds(prs, bounds_in), slide, prs.slide_height)
         for shape in removed:
             shape._element.getparent().remove(shape._element)
+        _blank_ownerless_chrome(slide, prs.slide_height)
         return slide, idx, palette, bounds
 
     layout = prs.slides[0].slide_layout if len(prs.slides) else prs.slide_layouts[0]
