@@ -679,3 +679,89 @@ def test_running_topic_slot_is_filled_not_guessed():
     from generator.generator import MAX_RUNNING_HEADER_CHARS
     assert len(h2.text_frame.text) <= MAX_RUNNING_HEADER_CHARS
     assert not h2.text_frame.text.endswith(" ")
+
+
+# --- per-textbox contrast ---------------------------------------------------
+
+def _card_deck(tmp_path, ink_colours):
+    """A pptx + matching PNGs, one slide per ink colour: a coloured "card" on a
+    white page with one text box on it. No LibreOffice — the renders are painted
+    directly, which is what lets this test state exact expected ratios."""
+    from PIL import Image, ImageDraw
+    from pptx import Presentation
+    from pptx.util import Emu, Inches
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Inches(10), Inches(5.63)
+    blank = prs.slide_layouts[6]
+    box = (Inches(1), Inches(2), Inches(6), Inches(1))  # left, top, w, h
+    card = (160, 224, 192)
+
+    pngs = []
+    for n, ink in enumerate(ink_colours):
+        slide = prs.slides.add_slide(blank)
+        shape = slide.shapes.add_textbox(*box)
+        shape.text_frame.text = "Платформа в работе"
+
+        img = Image.new("RGB", (1000, 563), (255, 255, 255))
+        draw = ImageDraw.Draw(img)
+        draw.rectangle([20, 20, 980, 543], fill=card)          # the card
+        # "glyphs": a minority of the box's area, as real text is
+        for row in range(6):
+            y = 205 + row * 4
+            draw.rectangle([110 + row * 3, y, 300 + row * 3, y + 2], fill=ink)
+        path = str(tmp_path / f"card-{n}.png")
+        img.save(path)
+        pngs.append(path)
+
+    pptx = str(tmp_path / "cards.pptx")
+    prs.save(pptx)
+    return pptx, pngs
+
+
+def test_boxed_contrast_reads_the_card_under_the_text_not_the_page_margin(tmp_path):
+    """The whole-frame scan cannot work on card layouts: the page margin and the
+    card are two large colour regions, so whichever is called "background", the
+    other becomes a huge "ink" cluster. Measured on a real deck every slide of
+    which is plainly legible — 5 of 6 flagged, ratio 1.32 on each, which is
+    white-page-vs-card and nothing to do with text.
+
+    Three inks on the same mint card:
+      black          — legible, must pass
+      brand blue     — 2.5:1 by LUMINANCE but 144 RGB units away, legible, must
+                       pass (the hue guard the declared pass has had since iter17)
+      near-mint      — the real defect: 1.6:1 and only 76 units away, must flag
+                       (the shade a renderer's anti-aliasing actually produces;
+                       text painted EXACTLY in the background colour leaves no
+                       pixels at all and is the declared-colour pass's job)
+    """
+    from evaluation.contrast import evaluate_boxed_contrast, evaluate_contrast
+
+    pptx, pngs = _card_deck(tmp_path, [(0, 0, 0), (64, 128, 240), (120, 170, 140)])
+
+    boxed = evaluate_boxed_contrast(pptx, pngs)
+    assert boxed["low_contrast_slides"] == [2], (
+        f"expected only the near-mint slide, got {boxed['low_contrast_slides']} "
+        f"from {boxed['per_slide']}")
+    # The brand-blue slide must count as MEASURED, not "no data": otherwise a
+    # slide whose only text is brand-coloured falls back to the frame scan and
+    # the false positive returns.
+    assert boxed["coverage"] == (3, 3), f"per_slide={boxed['per_slide']}"
+    assert boxed["per_slide"][1] is not None and boxed["per_slide"][1] < 3.0
+
+    # The frame scan is what this replaces: it should be measurably worse here.
+    frame = evaluate_contrast(pngs)
+    assert frame["low_contrast_slides"] != boxed["low_contrast_slides"], (
+        "fixture no longer reproduces the card-layout failure the boxed pass fixes")
+
+
+def test_boxed_contrast_stays_silent_when_the_box_is_mostly_ink(tmp_path):
+    """A box whose glyphs cover most of its area makes the modal colour the TEXT,
+    so the ratio would be measured against the wrong thing. Reporting nothing is
+    right — the frame scan still covers such a slide."""
+    from PIL import Image
+    from evaluation.contrast import _box_contrast
+
+    solid = list(Image.new("RGB", (40, 40), (10, 10, 10)).getdata())
+    assert _box_contrast(solid) is None          # no ink at all
+    assert _box_contrast(solid[:10]) is None     # too few pixels to cluster

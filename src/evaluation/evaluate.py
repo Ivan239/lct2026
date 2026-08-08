@@ -76,7 +76,22 @@ def evaluate_deck(pptx_path, brief, slide_roles=None, render_dir=None,
     # when the deck's ink washes out on a slide's background — the light-grey-on-
     # white breather defect the eye catches but font/overflow math misses. Only
     # lowers 1.1, never raises it.
+    # Measured inside each text box's own rectangle. The whole-frame scan cannot
+    # work on card layouts — two large colour regions mean whichever is called
+    # "background", the other becomes a huge "ink" cluster — and two attempts to
+    # rescue it were measured and reverted (iter20, iter21). On a deck every
+    # slide of which is plainly legible it flagged 5 of 6; the boxed pass flags
+    # none of them, at full coverage instead of 3/6, and still catches text
+    # painted in the card's own colour (verified on a deliberately broken copy).
+    # The frame scan stays as the fallback for slides with no measurable box.
+    bres = contrast.evaluate_boxed_contrast(pptx_path, png_paths)
     cres = contrast.evaluate_contrast(png_paths)
+    cres["boxed_per_slide"] = bres["per_slide"]
+    cres["boxed_coverage"] = bres["coverage"]
+    cres["low_contrast_slides"] = sorted(
+        set(bres["low_contrast_slides"])
+        | {i for i in cres["low_contrast_slides"] if bres["per_slide"][i] is None}
+    )
     # Second, independent pass: the pixel scan only sees text that differs from
     # the background; text painted almost IN the background colour forms no
     # cluster and slips through. Reading declared run colours against the

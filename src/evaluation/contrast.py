@@ -224,3 +224,112 @@ def reconcile(pixel_result, declared_result):
     pixel_low = set(pixel_result.get("low_contrast_slides", []))
     suppressed = pixel_low & declared_clear
     return sorted((pixel_low - suppressed) | invisible), sorted(suppressed)
+
+
+# --- Per-textbox measurement ------------------------------------------------
+# The whole-frame scan cannot work on card layouts and two measured attempts to
+# rescue it failed (iter20 moved the background source, iter21 resolved theme
+# colours; both made it MORE confidently wrong). The reason is structural: a card
+# slide has TWO large colour regions — the page margin and the card — so whichever
+# one is called "background", the other becomes a huge "ink" cluster. Measured on
+# a deck every slide of which is plainly legible: 5 of 6 slides flagged, ratio
+# 1.32 on each, which is white-page-vs-coloured-card and nothing to do with text.
+#
+# Text, though, sits on whatever is directly behind IT. The .pptx knows where
+# every text box is, so sample only inside those rectangles: the box's modal
+# colour is the local background (glyphs cover a minority of a text box), and the
+# dominant colour far from it is the ink. No page/card ambiguity can arise,
+# because a text box is never half margin and half card.
+BOX_INSET = 0.04          # trim the box border: rounded corners/edges of art bleed in
+MIN_BOX_PIXELS = 200      # below this the crop is too small to cluster reliably
+MAX_INK_SHARE = 0.45      # ink above this means the modal colour IS the text
+
+
+def _box_pixels(img, rect, size):
+    """Pixels inside a text box, in image coordinates. rect/size are EMU."""
+    w, h = img.size
+    x0 = int(w * (rect[0] + rect[2] * BOX_INSET) / size[0])
+    x1 = int(w * (rect[0] + rect[2] * (1 - BOX_INSET)) / size[0])
+    y0 = int(h * (rect[1] + rect[3] * BOX_INSET) / size[1])
+    y1 = int(h * (rect[1] + rect[3] * (1 - BOX_INSET)) / size[1])
+    x0, y0 = max(0, x0), max(0, y0)
+    x1, y1 = min(w, x1), min(h, y1)
+    if x1 - x0 < 2 or y1 - y0 < 2:
+        return []
+    return list(img.crop((x0, y0, x1, y1)).getdata())
+
+
+def _box_contrast(pixels):
+    """(ratio, ink, bg) for one text box, or None when it can't be measured."""
+    if len(pixels) < MIN_BOX_PIXELS:
+        return None
+    quant = [_quantize(p) for p in pixels]
+    counts = Counter(quant)
+    bg = counts.most_common(1)[0][0]
+    ink = [p for p in quant if _dist(p, bg) > INK_DISTANCE]
+    if not ink or len(ink) / len(quant) > MAX_INK_SHARE:
+        # No glyphs found, or the box is mostly "ink" — which means the modal
+        # colour is the text and the background is what we'd be measuring
+        # against. Either way this box cannot answer the question; stay silent
+        # rather than report a number that means something else.
+        return None
+    colour, n = Counter(ink).most_common(1)[0]
+    if n / len(ink) < MIN_INK_FRACTION:
+        return None
+    return contrast_ratio(colour, bg), colour, bg
+
+
+def evaluate_boxed_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATIO):
+    """Contrast measured inside each text box's own rectangle.
+
+    Returns {"per_slide": [worst_ratio|None], "low_contrast_slides": [idx],
+    "coverage": (slides_with_data, total)} — same shape as the frame scan, so it
+    can stand in for it. A slide's ratio is its WORST measurable box."""
+    from pptx import Presentation
+
+    prs = Presentation(pptx_path)
+    size = (prs.slide_width, prs.slide_height)
+    per, low = [], []
+    for i, slide in enumerate(prs.slides):
+        if i >= len(png_paths):
+            per.append(None)
+            continue
+        with Image.open(png_paths[i]) as raw:
+            img = raw.convert("RGB")
+            worst, flagged = None, False
+            for shape in slide.shapes:
+                if not shape.has_text_frame or not shape.text_frame.text.strip():
+                    continue
+                if None in (shape.left, shape.top) or not (shape.width and shape.height):
+                    continue
+                measured = _box_contrast(
+                    _box_pixels(img, (shape.left, shape.top, shape.width, shape.height), size))
+                if measured is None:
+                    continue
+                ratio, ink, bg = measured
+                worst = ratio if worst is None else min(worst, ratio)
+                # WCAG contrast is a LUMINANCE ratio and ignores hue, so a
+                # high-chroma brand pairing scores like invisible text: this
+                # deck's blue headings measure 2.50-2.96 on the mint and beige
+                # cards and are perfectly legible. Same guard the declared-colour
+                # pass has carried since iter17 — "invisible" has to mean the
+                # colours are actually CLOSE. Measured here: those headings sit
+                # 144 and 201 RGB units from their card, well outside the
+                # threshold, while real invisible text lands far inside it.
+                #
+                # A box cleared by that guard must still count as MEASURED. The
+                # first version returned it as "no data", and a slide whose only
+                # text is brand-coloured then fell back to the frame scan — the
+                # exact false positive this pass exists to remove. Caught by the
+                # synthetic card test, not by the real deck, where such slides
+                # happened to carry other text too.
+                if ratio < threshold and _dist(ink, bg) < INVISIBLE_MAX_DISTANCE:
+                    flagged = True
+        per.append(worst)
+        if flagged:
+            low.append(i)
+    return {
+        "per_slide": per,
+        "low_contrast_slides": low,
+        "coverage": (sum(1 for r in per if r is not None), len(per)),
+    }
