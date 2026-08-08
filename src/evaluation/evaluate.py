@@ -85,6 +85,7 @@ def evaluate_deck(pptx_path, brief, slide_roles=None, render_dir=None,
     dres = contrast.evaluate_declared_contrast(pptx_path, png_paths)
     cres["invisible_text_slides"] = dres["invisible_slides"]
     cres["declared_per_slide"] = dres["per_slide"]
+    cres["declared_coverage"] = dres.get("coverage")
 
     low, suppressed = contrast.reconcile(cres, dres)
     cres["pixel_low_suppressed"] = suppressed

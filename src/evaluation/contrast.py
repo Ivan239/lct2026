@@ -149,7 +149,15 @@ def _declared_run_colours(slide):
                     if colour is None or colour.type is None or colour.rgb is None:
                         continue
                     rgb = colour.rgb
-                except Exception:  # noqa: BLE001 — scheme colour, nothing to compare
+                except Exception:  # noqa: BLE001 — scheme colour, see note below
+                    # Scheme colours are deliberately NOT resolved through the
+                    # theme palette. Tried it and reverted: the theme claimed
+                    # #EEEEEE (lt2) for text that renders BLACK, so two legible
+                    # card slides came back "invisible". Scheme tokens resolve
+                    # through the master's <p:clrMap>, and on top of that the
+                    # theme routinely lies about the deck's real look (CLAUDE.md).
+                    # Staying blind here is safer than being confidently wrong —
+                    # the pixel scan still covers those slides.
                     continue
                 out.append((len(text.strip()), (rgb[0], rgb[1], rgb[2])))
     return out
@@ -157,7 +165,13 @@ def _declared_run_colours(slide):
 
 def evaluate_declared_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATIO):
     """Slides whose declared text colour is invisible against the measured
-    background. Returns {"per_slide": [worst_ratio|None], "invisible_slides": [idx]}."""
+    background. Returns {"per_slide": [worst_ratio|None], "invisible_slides":
+    [idx], "coverage": (slides_with_data, total)}.
+
+    `coverage` is reported because this pass reads EXPLICIT rgb only and is
+    simply blind on theme-coloured text — on a card template that can be most of
+    the deck. Without it in the result, every later reader has to rediscover
+    that blindness before trusting a clean verdict."""
     from pptx import Presentation
 
     from design_system.style_profile import page_base_color, slide_background
@@ -183,7 +197,11 @@ def evaluate_declared_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATI
         per.append(worst)
         if bad_chars / total >= INVISIBLE_TEXT_SHARE:
             flagged.append(i)
-    return {"per_slide": per, "invisible_slides": flagged}
+    return {
+        "per_slide": per,
+        "invisible_slides": flagged,
+        "coverage": (sum(1 for r in per if r is not None), len(per)),
+    }
 
 
 def reconcile(pixel_result, declared_result):
