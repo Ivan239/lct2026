@@ -553,3 +553,28 @@ def test_declared_colour_check_catches_invisible_text(tmp_path):
     # ordinary readable text -> not flagged
     path, pngs = deck_with((20, 20, 20), (248, 248, 248))
     assert evaluate_declared_contrast(path, pngs)["invisible_slides"] == []
+
+
+def test_static_slide_numbers_are_renumbered(tmp_path):
+    """A cloned canvas carries the template's own page number, so a deck whose
+    first slide was cut from template slide 5 opened showing "05". Renumbering
+    must follow the SHIPPING order and must not touch a number that is real
+    content — "05" as a KPI figure has to survive."""
+    from generator.generator import _renumber_static_slide_numbers
+
+    prs = Presentation()
+    for _ in range(2):
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        # chrome: small box in the bottom band -> renumbered
+        foot = slide.shapes.add_textbox(Inches(9), Inches(7.0), Inches(0.6), Inches(0.3))
+        foot.text_frame.text = "07"
+        # content: tall box mid-slide holding the same digits -> untouched
+        body = slide.shapes.add_textbox(Inches(1), Inches(3), Inches(4), Inches(1.5))
+        body.text_frame.text = "05"
+
+    _renumber_static_slide_numbers(prs)
+
+    for i, slide in enumerate(prs.slides, start=1):
+        texts = [s.text_frame.text for s in slide.shapes if s.has_text_frame]
+        assert str(i).zfill(2) in texts, f"slide {i} footer not renumbered: {texts}"
+        assert "05" in texts, f"content number was overwritten on slide {i}: {texts}"

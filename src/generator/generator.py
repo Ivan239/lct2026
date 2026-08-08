@@ -34,6 +34,7 @@ from template_parser.parser import extract_template, extract_theme
 from generator.slide_kit import (
     content_text_shapes as _content_text_shapes,
     is_boring_placeholder as _is_boring_placeholder,
+    is_chrome_shape,
     text_shapes as _text_shapes,
 )
 
@@ -1104,6 +1105,41 @@ def _realign_icons_after_resize(prs, changes, resolver=None):
         _reposition_bullet_icons(icons, shape, texts, max(sizes), metrics=metrics)
 
 
+def _renumber_static_slide_numbers(prs):
+    """A cloned canvas brings the template's own page number with it, so a deck
+    whose first slide was cut from template slide 5 opens showing "05". The
+    number is a plain text box on Google-Slides exports (no SLIDE_NUMBER
+    placeholder), so nothing downstream updates it and the chrome filter — quite
+    rightly — keeps it as furniture.
+
+    Called only after _reorder_and_prune_slides, when prs.slides is already the
+    shipping order, so position i simply means page i+1.
+
+    Deliberately narrow, because "05" can also be real content (a KPI figure):
+    only shapes the chrome filter already recognises as furniture, only a single
+    run, and only text that is nothing but digits. Zero padding is preserved so
+    "05" becomes "01", not "1"."""
+    for position, slide in enumerate(prs.slides, start=1):
+        height = prs.slide_height
+        for shape in slide.shapes:
+            if not shape.has_text_frame or not is_chrome_shape(shape, height):
+                continue
+            if shape.is_placeholder:
+                try:
+                    # A real slide-number placeholder renumbers itself.
+                    if shape.placeholder_format.type == PP_PLACEHOLDER.SLIDE_NUMBER:
+                        continue
+                except (KeyError, ValueError):
+                    pass
+            runs = [r for p in shape.text_frame.paragraphs for r in p.runs]
+            if len(runs) != 1:
+                continue
+            text = runs[0].text.strip()
+            if not text.isdigit():
+                continue
+            runs[0].text = str(position).zfill(len(text))
+
+
 def _reorder_and_prune_slides(prs, ordered_slide_indices):
     """Reorders sldIdLst to ordered_slide_indices and permanently drops every
     other slide — clone sources plus any clone left over from stretch/shrink
@@ -1218,6 +1254,7 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
     _realign_icons_after_resize(prs, list(shrink_fixes) + harmonize_changes, resolver=resolver)
 
     _reorder_and_prune_slides(prs, final_order)
+    _renumber_static_slide_numbers(prs)
     prs.save(out_path)
     # Package-integrity gate (plan 9.6): three separate "PowerPoint wants to
     # repair this" incidents proved that rendering fine in LibreOffice is no
