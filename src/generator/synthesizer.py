@@ -119,6 +119,50 @@ def _recolor_for_canvas(palette, canvas_bg):
     return out
 
 
+# A cloned canvas's own text area is only a usable content area if it is a
+# reasonable share of the layout the template designs for. Below this the slide
+# was never a content slide (a divider's single line) and its band starves
+# whatever role is being synthesized onto it. Measured: the three narrow
+# canvases per T-Zh template sit at 20-39% of the full band, real content
+# slides well above it.
+_MIN_CANVAS_BAND_FRACTION = 0.4
+
+
+def _band_height(bounds):
+    return int(bounds["bottom"]) - int(bounds["top"])
+
+
+# Clearance between synthesized content and the canvas's own header/footer.
+_CHROME_GAP_EMU = int(Inches(0.12))
+
+
+def _clip_to_canvas_chrome(bounds, slide, slide_height):
+    """Keep template-wide bounds clear of the furniture the CANVAS still carries.
+
+    The clone keeps its header strip, footer rule, page number and caption slot;
+    the template-wide band was measured across all slides and can run straight
+    through them. Seen on the render: the image frame's dashed border crossed
+    the footer rule and boxed in «КОММЕНТАРИЙ» and the page number. Only the
+    edge bands are clipped — chrome by definition hugs them — so a canvas
+    without furniture is unaffected."""
+    from generator.slide_kit import is_chrome_shape
+
+    top, bottom = int(bounds["top"]), int(bounds["bottom"])
+    middle = slide_height // 2
+    for shape in slide.shapes:
+        if shape.top is None or shape.height is None:
+            continue
+        if not is_chrome_shape(shape, slide_height):
+            continue
+        if shape.top < middle:  # header band
+            top = max(top, int(shape.top + shape.height) + _CHROME_GAP_EMU)
+        else:                   # footer band
+            bottom = min(bottom, int(shape.top) - _CHROME_GAP_EMU)
+    if bottom <= top:
+        return bounds
+    return dict(bounds, top=Emu(top), bottom=Emu(bottom))
+
+
 def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None):
     """Adds a new slide (appended at the end of prs.slides) and returns
     (slide, index, palette, bounds).
@@ -140,6 +184,7 @@ def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None)
                                       canvas_bg if canvas_bg is not None else _slide_bg_hex(slide))
         removed = content_text_shapes(slide)
         placed = [s for s in removed if s.left is not None and s.top is not None and s.width and s.height]
+        bounds = None
         if placed:
             bounds = {
                 "left": Emu(min(s.left for s in placed)),
@@ -147,8 +192,21 @@ def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None)
                 "right": Emu(max(s.left + s.width for s in placed)),
                 "bottom": Emu(max(s.top + s.height for s in placed)),
             }
-        else:
-            bounds = _resolve_bounds(prs, bounds_in)
+            # …but only if that area can actually hold content. The canvas is
+            # being REUSED for a different role, and a slide whose own text is
+            # one low line (a divider, a closing) hands back a sliver: T-Zh
+            # study slide 10 gives 1.03in against the template's 4.04in. The
+            # measured consequence was a whole slide reduced to a heading — the
+            # image frame needs MIN_FRAME_HEIGHT below the title, both bands
+            # came out NEGATIVE, and synthesize_image_caption silently drew
+            # nothing on a full-page empty card. Every T-Zh template has three
+            # such canvases, and they are exactly the ones offered for synthesis.
+            if _band_height(bounds) < _MIN_CANVAS_BAND_FRACTION * _band_height(
+                    _resolve_bounds(prs, bounds_in)):
+                bounds = None
+        if bounds is None:
+            bounds = _clip_to_canvas_chrome(
+                _resolve_bounds(prs, bounds_in), slide, prs.slide_height)
         for shape in removed:
             shape._element.getparent().remove(shape._element)
         return slide, idx, palette, bounds
