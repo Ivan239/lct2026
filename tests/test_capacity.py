@@ -77,3 +77,28 @@ def test_grid_row_inside_the_chrome_band_still_counts_as_slots():
         "the bottom row is what this test is about — if nothing here is "
         "chrome-classified the fixture changed and the test proves nothing")
     assert not all(is_chrome_shape(s, prs.slide_height) for s in slots)
+
+
+@requires(TJ_TEMPLATE)
+@requires(TJ_UNIVERSAL)
+def test_a_one_big_number_stats_slide_has_capacity_one():
+    """The T-Zh study template's stats slide is «20 227 000» set at 82pt under a
+    26pt title — a one-big-number design. It reaches get_capacity's
+    single-text-block fallback, which answered "no fixed capacity", so three
+    stat pairs went in and the render showed three same-size lines reading as
+    sentences. The design was gone.
+
+    A body run 1.5x the title is a display figure, and such a slide holds one
+    figure. Both sizes must be STATED: the universal template's own single-box
+    stats slide leaves its runs unsized (Google Slides export), and guessing
+    there is the blindness _pick_title_shape already suffers from — it keeps the
+    old answer. Its 8-box KPI board never reaches this fallback at all."""
+    from generator.generator import get_capacity
+
+    study = list(Presentation(TJ_TEMPLATE).slides)[8]
+    assert get_capacity(study, "stats_kpi") == 1
+
+    universal = list(Presentation(TJ_UNIVERSAL).slides)
+    assert get_capacity(universal[9], "stats_kpi") == 4, "the KPI board must be untouched"
+    assert get_capacity(universal[8], "stats_kpi") is None, (
+        "an unsized body must keep the conservative answer, not a guessed 1")

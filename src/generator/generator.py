@@ -1156,6 +1156,24 @@ def _fill_two_column_comparison(slide, data, claimed_ids, resolver=None):
     _set_paragraph_texts(right_points, data.get("right_points", []), claimed_ids, resolver=resolver)
 
 
+# A body run this much larger than the slide's title is a display figure, not
+# body copy. Measured: the T-Zh study stats slide is 82pt against a 26pt title
+# (3.2x), its universal sibling's KPI board runs 11/24pt against a 42pt title.
+_DISPLAY_SIZE_RATIO = 1.5
+
+
+def _is_display_sized(shape, title_shape):
+    """True when the box carries a display-size figure. Both sizes must be
+    STATED: Google-Slides exports leave runs unsized, and guessing there is what
+    _pick_title_shape already suffers from — an unsized box simply keeps the
+    old "no fixed capacity" answer."""
+    body = _max_font_pt(shape)
+    title = _max_font_pt(title_shape) if title_shape is not None else None
+    if not body or not title:
+        return False
+    return body >= title * _DISPLAY_SIZE_RATIO
+
+
 def get_capacity(slide, archetype):
     """How many content items (bullets / stat pairs) the native slide structure
     can actually hold for this archetype — read-only, doesn't write anything.
@@ -1199,7 +1217,15 @@ def get_capacity(slide, archetype):
         # Single-text-block fallback (see _fill_stats_kpi): still capped by
         # icon markers when present, same reasoning as bullet_list above.
         icons = _find_bullet_icons(slide, boxes[0])
-        return len(icons) if icons else None
+        if icons:
+            return len(icons)
+        # One box set at DISPLAY size is a one-big-number slide, and its capacity
+        # is exactly one. The T-Zh study template's stats slide is «20 227 000»
+        # at 82pt under a 26pt title; reporting "no fixed capacity" let three
+        # pairs in, and the render showed three same-size lines reading as
+        # sentences — the design gone. The T-Zh universal KPI board (8 boxes at
+        # 11/24pt) is unaffected: it never reaches this fallback.
+        return 1 if _is_display_sized(boxes[0], title_shape) else None
 
     return None
 
