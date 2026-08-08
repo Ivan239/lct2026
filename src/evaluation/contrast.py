@@ -184,3 +184,25 @@ def evaluate_declared_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATI
         if bad_chars / total >= INVISIBLE_TEXT_SHARE:
             flagged.append(i)
     return {"per_slide": per, "invisible_slides": flagged}
+
+
+def reconcile(pixel_result, declared_result):
+    """Combine the two passes into the slides that really are unreadable.
+
+    The pixel scan is unreliable on card layouts: the page margin around a
+    coloured card reads as a second huge colour region, so it called six of
+    eight T-Zh slides low-contrast when every one was perfectly legible. The
+    declared-colour pass measures the actual run colours, so where it HAS data
+    for a slide and finds nothing invisible, its verdict wins and the pixel flag
+    is dropped. Where the text is theme-inherited it has no colours to read,
+    stays silent, and the pixel scan remains the only witness.
+
+    Returns (low_slides, suppressed) — both 0-based, sorted."""
+    invisible = set(declared_result.get("invisible_slides", []))
+    declared_clear = {
+        i for i, ratio in enumerate(declared_result.get("per_slide", []))
+        if ratio is not None and i not in invisible
+    }
+    pixel_low = set(pixel_result.get("low_contrast_slides", []))
+    suppressed = pixel_low & declared_clear
+    return sorted((pixel_low - suppressed) | invisible), sorted(suppressed)
