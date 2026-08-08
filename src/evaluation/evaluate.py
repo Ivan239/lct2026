@@ -76,34 +76,35 @@ def evaluate_deck(pptx_path, brief, slide_roles=None, render_dir=None,
     # when the deck's ink washes out on a slide's background — the light-grey-on-
     # white breather defect the eye catches but font/overflow math misses. Only
     # lowers 1.1, never raises it.
-    # Measured inside each text box's own rectangle. The whole-frame scan cannot
-    # work on card layouts — two large colour regions mean whichever is called
-    # "background", the other becomes a huge "ink" cluster — and two attempts to
-    # rescue it were measured and reverted (iter20, iter21). On a deck every
-    # slide of which is plainly legible it flagged 5 of 6; the boxed pass flags
-    # none of them, at full coverage instead of 3/6, and still catches text
-    # painted in the card's own colour (verified on a deliberately broken copy).
-    # The frame scan stays as the fallback for slides with no measurable box.
-    bres = contrast.evaluate_boxed_contrast(pptx_path, png_paths)
-    cres = contrast.evaluate_contrast(png_paths)
-    cres["boxed_per_slide"] = bres["per_slide"]
-    cres["boxed_coverage"] = bres["coverage"]
-    cres["low_contrast_slides"] = sorted(
-        set(bres["low_contrast_slides"])
-        | {i for i in cres["low_contrast_slides"] if bres["per_slide"][i] is None}
-    )
-    # Second, independent pass: the pixel scan only sees text that differs from
-    # the background; text painted almost IN the background colour forms no
-    # cluster and slips through. Reading declared run colours against the
-    # measured background catches it — found real invisible bullets, (33,63,255)
-    # text on a (32,56,248) slide, which the eye reads as "the slide is empty".
+    # Measured inside each text box's own rectangle (iter34). The whole-frame
+    # scan cannot work on card layouts — two large colour regions mean whichever
+    # is called "background", the other becomes a huge "ink" cluster — and two
+    # attempts to rescue it were measured and reverted (iter20, iter21).
+    #
+    # It was kept as a fallback for slides the boxed pass cannot measure. That
+    # fallback is now gone, on measurement: across 30 slides generated on all
+    # five real templates the boxed pass covered EVERY slide, so the fallback
+    # never once fired — while on the card template, asked the same question, it
+    # answered "low contrast" for 5 of 6 plainly legible slides. Its expected
+    # contribution is no true positives and some false ones. Slides it cannot
+    # measure are reported as missing coverage instead of guessed at; a slide
+    # with no readable text box has no text-contrast verdict to give.
+    cres = contrast.evaluate_boxed_contrast(pptx_path, png_paths)
+    # Second, independent pass: the pixel measurement only sees text that
+    # differs from its background; text painted almost IN the background colour
+    # forms no cluster and slips through. Reading declared run colours against
+    # the measured background catches it — found real invisible bullets,
+    # (33,63,255) text on a (32,56,248) slide, which the eye reads as "the slide
+    # is empty". The two are ADDITIVE: each sees what the other structurally
+    # cannot. The old reconcile step existed to suppress the frame scan's card
+    # false positives, and suppressing a boxed verdict — measured on the actual
+    # rendered glyphs — would now only lose true positives.
     dres = contrast.evaluate_declared_contrast(pptx_path, png_paths)
     cres["invisible_text_slides"] = dres["invisible_slides"]
     cres["declared_per_slide"] = dres["per_slide"]
     cres["declared_coverage"] = dres.get("coverage")
 
-    low, suppressed = contrast.reconcile(cres, dres)
-    cres["pixel_low_suppressed"] = suppressed
+    low = sorted(set(cres["low_contrast_slides"]) | set(dres["invisible_slides"]))
     if low:
         frac = len(low) / len(png_paths)
         cscore = max(1, min(5, round(5 - 4 * frac)))

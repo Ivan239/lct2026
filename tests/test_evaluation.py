@@ -580,33 +580,25 @@ def test_static_slide_numbers_are_renumbered(tmp_path):
         assert "05" in texts, f"content number was overwritten on slide {i}: {texts}"
 
 
-def test_reconcile_drops_card_layout_false_positives():
-    """The pixel scan reads the page margin around a coloured card as a second
-    huge colour region and called six of eight legible T-Zh slides low-contrast.
-    Where the declared-colour pass has data and finds nothing invisible it is
-    the better witness, so its verdict wins; where the text is theme-inherited
-    it has nothing to read and the pixel scan still stands."""
-    from evaluation.contrast import reconcile
+def test_contrast_verdict_is_the_union_of_two_passes():
+    """The two passes see what the other structurally cannot: the boxed pass
+    measures the glyphs a renderer actually painted, the declared pass reads
+    colours for text that left no pixels at all because it was painted IN the
+    background. So the verdict is their UNION.
 
-    pixel = {"low_contrast_slides": [0, 1, 3, 5, 6, 7]}
-    declared = {
-        # slides 3,6,7 measured and clean -> suppress; 0,1,5 have no colours
-        "per_slide": [None, None, None, 8.1, None, None, 7.4, 9.0],
-        "invisible_slides": [],
-    }
-    low, suppressed = reconcile(pixel, declared)
-    assert suppressed == [3, 6, 7]
-    assert low == [0, 1, 5]
+    There used to be a reconcile step where the declared pass could SUPPRESS a
+    pixel flag. It existed for the whole-frame scan's card-layout false
+    positives; that scan is no longer consulted, and suppressing a boxed verdict
+    — taken from the rendered glyphs inside their own box — could only lose true
+    positives. Deleted rather than left dead, so it cannot be rewired by
+    accident."""
+    from evaluation import contrast
 
-    # a real invisible-text slide is always reported, even if the pixel pass missed it
-    low, suppressed = reconcile({"low_contrast_slides": []},
-                                {"per_slide": [1.08], "invisible_slides": [0]})
-    assert low == [0] and suppressed == []
+    assert not hasattr(contrast, "reconcile")
 
-    # declared pass blind everywhere -> pixel verdict passes through untouched
-    low, suppressed = reconcile({"low_contrast_slides": [2]},
-                                {"per_slide": [None, None, None], "invisible_slides": []})
-    assert low == [2] and suppressed == []
+    boxed = {"low_contrast_slides": [1]}
+    declared = {"invisible_slides": [3]}
+    assert sorted(set(boxed["low_contrast_slides"]) | set(declared["invisible_slides"])) == [1, 3]
 
 
 def test_image_placeholder_never_leaves_the_slide():
