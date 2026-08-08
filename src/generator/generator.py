@@ -33,6 +33,7 @@ from template_parser.parser import extract_template, extract_theme
 # many existing call sites and tests stable.
 from generator.slide_kit import (
     content_text_shapes as _content_text_shapes,
+    slide_width as _slide_width,
     is_boring_placeholder as _is_boring_placeholder,
     is_chrome_shape,
     text_shapes as _text_shapes,
@@ -733,6 +734,10 @@ def _uniform_axis(values):
     return coords
 
 
+# Real list grids measure 18-31% of the slide width; a numbering badge row is 3%.
+_MIN_SLOT_WIDTH_FRACTION = 0.10
+
+
 def _find_slot_boxes(slide, claimed_ids):
     """A GRID (R rows × C columns, either may be 1) of >=3 same-size text
     boxes with near-constant steps along each occupied axis — the multi-box
@@ -740,9 +745,18 @@ def _find_slot_boxes(slide, claimed_ids):
     numbered 2×3 grid (plan 10в: the vertical-only detector filled the left
     column and blanked the right one into "invisible" leftovers). Returns
     boxes in reading order (row-major), or []."""
+    # A grid of same-size boxes is only a LIST pattern if its cells can actually
+    # hold list text. The T-Zh universal template numbers its items with a row of
+    # 0.26in badges ("01".."06") — a perfect grid by every geometric test, and
+    # filling it stuffed each bullet into a 19pt-wide column that rendered as an
+    # 8pt stack of three-letter fragments. Measured across the corpus, real list
+    # grids are 18-31% of the slide width and the badge row is 3%, so the cut is
+    # nowhere near either side.
+    min_slot_width = _slide_width(slide) * _MIN_SLOT_WIDTH_FRACTION
     boxes = [
         s for s in _content_text_shapes(slide, claimed_ids)
         if s.left is not None and s.top is not None and s.width and s.height
+        and s.width >= min_slot_width
     ]
     by_shape = {}
     for b in boxes:

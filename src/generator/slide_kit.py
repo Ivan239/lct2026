@@ -43,6 +43,10 @@ def slide_height(slide):
     return slide.part.package.presentation_part.presentation.slide_height
 
 
+def slide_width(slide):
+    return slide.part.package.presentation_part.presentation.slide_width
+
+
 def is_chrome_shape(shape, height):
     if shape.height is None or shape.top is None or shape.height > CHROME_MAX_HEIGHT_EMU:
         return False

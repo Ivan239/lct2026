@@ -182,3 +182,34 @@ def test_no_word_is_wider_than_its_box(template, tmp_path):
                             offenders.append((position, word, round(run.font.size.pt)))
                             break
     assert not offenders, f"words wider than their box (renderer will split them): {offenders[:4]}"
+
+
+@requires(TJ_UNIVERSAL)
+def test_numbering_badges_are_not_used_as_list_slots(tmp_path):
+    """A grid of same-size boxes is only a list pattern if its cells can hold
+    list text. The T-Zh universal template numbers its items with a row of
+    0.26in badges ("01".."06") — geometrically a perfect grid, and filling it
+    stuffed each bullet into a 19pt-wide column that rendered as an 8pt stack of
+    three-letter fragments. Real list grids in the corpus are 18-31% of the
+    slide width; the badge row is 3%."""
+    from generator.generator import _find_slot_boxes, generate
+
+    source = Presentation(TJ_UNIVERSAL)
+    slide_width = source.slide_width
+    for slide in source.slides:
+        for box in _find_slot_boxes(slide, set()):
+            assert box.width / slide_width >= 0.08, (
+                f"slot {Emu(box.width).inches:.2f}in wide is too narrow to hold list text")
+
+    block = {"type": "bullet_list", "title": "Конкурентоспособность",
+             "bullets": ["Клиентоориентированность", "Стандартизированность", "Взаимодействие"]}
+    out = str(tmp_path / "badges.pptx")
+    generate(TJ_UNIVERSAL, [(block, 2)], out)
+
+    prs = Presentation(out)
+    placed = [
+        shape for shape in list(prs.slides)[0].shapes
+        if shape.has_text_frame and "Клиентоориентированность" in shape.text_frame.text.replace("\xad", "")
+    ]
+    assert placed, "the bullet text vanished"
+    assert placed[0].width / prs.slide_width >= 0.08, "bullet landed in a numbering badge"
