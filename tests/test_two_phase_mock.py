@@ -84,3 +84,53 @@ def test_stats_pairs_shape_validated():
 def test_missing_title_rejected():
     with pytest.raises(ValueError):
         _validate_block({"bullets": ["a", "b", "c"]}, "bullet_list", 3)
+
+
+# --- per-slide item budget ---------------------------------------------------
+
+class CapturingClient(FakeClient):
+    """Remembers the prompt text of every call."""
+
+    def __init__(self, responses):
+        super().__init__(responses)
+        self.prompts = []
+
+    def chat(self, messages, model=None, **kwargs):
+        self.prompts.append(" ".join(m.get("content", "") for m in messages))
+        return super().chat(messages, model=model, **kwargs)
+
+
+def test_block_prompt_carries_the_slides_own_item_budget():
+    """A 1.93in one-line slot and a full-width prose box are both "a list", and
+    the flat 72-char budget makes the narrow one unreadable: a 24-char single
+    word cannot wrap (the box is one line tall) and cannot be broken, so the
+    fitter drops to its 9pt floor — measured, against the ~14pt the template
+    itself renders that label at."""
+    good = json.dumps({"title": "Заголовок", "bullets": ["раз", "два", "три"]})
+    client = CapturingClient([good])
+    generate_block(client, "bullet_list", "тема", "бриф", count=3,
+                   models=["GigaChat"], item_chars=18)
+    assert "до 18 символов" in client.prompts[0]
+    assert "__MAXCHARS__" not in client.prompts[0]
+
+
+def test_item_budget_only_tightens_never_loosens():
+    """The survey templates' prose boxes hand back 250-300 char samples; letting
+    those through would ask for LONGER bullets than today on every roomy
+    template, which is a regression, not a fix."""
+    from content_parser.two_phase import MAX_BULLET_CHARS, bullet_char_budget
+
+    assert bullet_char_budget(18) == 18
+    assert bullet_char_budget(292) == MAX_BULLET_CHARS
+    assert bullet_char_budget(None) == MAX_BULLET_CHARS
+
+
+def test_over_budget_item_is_never_cut_mid_word():
+    """`item[:max].rsplit(" ", 1)[0]` silently returns the whole slice when the
+    slice holds no space, i.e. it shipped «Клиентоориентирова». The fitter can
+    shrink a long word; nothing downstream can put its letters back."""
+    from content_parser.two_phase import _trim_to_budget
+
+    assert _trim_to_budget("Клиентоориентированность", 18) == "Клиентоориентированность"
+    assert _trim_to_budget("Забота о клиенте и партнёре", 18) == "Забота о клиенте"
+    assert _trim_to_budget("Коротко", 18) == "Коротко"

@@ -1102,6 +1102,57 @@ def get_capacity(slide, archetype):
     return None
 
 
+# How much longer than the designer's own sample a generated item may run.
+# The sample is an EXAMPLE, not a hard maximum, so a little slack is right; but
+# the measured failure (a 24-char word in a slot whose sample is 15) has to land
+# outside it, which puts the ceiling well under 1.6x.
+ITEM_CHARS_SLACK = 1.2
+# Never ask for less than a few real words, whatever a terse sample says.
+MIN_ITEM_CHARS = 12
+
+
+def get_item_char_budget(slide, archetype):
+    """How LONG a single list item may be on this slide — the companion to
+    get_capacity, which only answers HOW MANY.
+
+    Measured defect this exists for: the T-Zh mono list slot is 1.93x0.25in with
+    the designer's own sample text "Название пункта" (15 chars). Content is
+    generated against a FLAT 72-char budget, so a 24-char single word lands in
+    it, cannot be wrapped (the box is one line tall) and cannot be broken, and
+    the fitter shrinks it to its 9pt floor — a third of the ~14pt the template
+    itself renders that label at. _fit_size_for_shape already says as much at
+    that floor: past this point the CONTENT is too long.
+
+    The budget comes from the template's OWN sample text, not from geometry:
+    the size those slots inherit is not in the run (it resolves through the
+    placeholder/master chain, and the theme routinely lies about the deck's real
+    look), so measuring chars-per-line means guessing the very number that is
+    unreliable. The designer already answered the question by writing an example
+    of the right length into the box. The two agree where both can be computed:
+    metrics give ~17 chars for that slot at its rendered size, the sample is 15.
+
+    Returns None when there is no sample to learn from — the caller keeps its
+    flat default, so a template that ships empty slots is no worse off."""
+    if archetype != "bullet_list":
+        return None
+    claimed_ids = set()
+    shapes = _find_slot_boxes(slide, claimed_ids)  # same order as _fill_bullet_list
+    if shapes:
+        samples = [s.text_frame.text.strip() for s in shapes if s.has_text_frame]
+    else:
+        body_shape = _pick_body_shape(slide, claimed_ids)
+        if body_shape is None:
+            return None
+        samples = [
+            "".join(run.text for run in body_shape.text_frame.paragraphs[i].runs).strip()
+            for i in _content_slot_indices(body_shape)
+        ]
+    lengths = [len(t) for t in samples if t]
+    if not lengths:
+        return None
+    return max(MIN_ITEM_CHARS, round(max(lengths) * ITEM_CHARS_SLACK))
+
+
 def _fill_image_caption(slide, data, claimed_ids, resolver=None):
     """Native image_caption slide: the template already supplies the artwork, so
     we only write the heading and the caption describing what the image shows.

@@ -12,7 +12,7 @@ changing consumers."""
 
 from pptx import Presentation
 
-from generator.generator import get_capacity
+from generator.generator import get_capacity, get_item_char_budget
 from generator.slide_kit import content_text_shapes
 
 # Roles that make sense as fill targets. "other" is everything we explicitly
@@ -57,6 +57,9 @@ def build_spec(template_path, archetype_map, style_profile=None):
         entry = {"idx": idx, "capacity": None, "bg": backgrounds.get(idx)}
         if role in COUNTED_ROLES:
             entry["capacity"] = get_capacity(prs.slides[idx], role)
+            # How LONG one item may be here, not just how many fit — a 1.93in
+            # one-line slot and a full-width prose box are both "a list".
+            entry["item_chars"] = get_item_char_budget(prs.slides[idx], role)
         by_role.setdefault(role, []).append(entry)
 
     families = []

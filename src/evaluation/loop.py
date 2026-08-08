@@ -198,10 +198,16 @@ def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_p
     # Blocks are generated one call at a time and can't see each other — carry the
     # stat numbers/labels already placed so a later stat slide can't repeat them.
     used_nums, used_labels = set(), set()
+    # The slide is chosen BEFORE its text is written, so the item budget of that
+    # exact slide is known here (SYNTHESIZE positions have no template slide and
+    # keep the flat default).
+    item_chars = {s["idx"]: s.get("item_chars")
+                  for fam in spec["families"] for s in fam["slides"]}
     for item, slide_idx, final_count in assignments:
         block = generate_block(client, item["role"], item["theme"], brief,
                                count=final_count, models=models, style_preamble=style_preamble,
-                               used_stats=(used_nums, used_labels))
+                               used_stats=(used_nums, used_labels),
+                               item_chars=item_chars.get(slide_idx))
         nums, labels = stat_fingerprints(block)
         used_nums |= nums
         used_labels |= labels

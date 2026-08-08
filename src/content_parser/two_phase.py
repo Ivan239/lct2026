@@ -94,7 +94,7 @@ __BRIEF__
     "bullet_list": """Напиши контент слайда-списка для презентации по брифу.
 Тема слайда: __THEME__
 Ответь ТОЛЬКО валидным JSON:
-{"title": "заголовок слайда, до 7 слов", "bullets": [РОВНО __COUNT__ строк, каждая — короткая фраза до 60 символов]}
+{"title": "заголовок слайда, до 7 слов", "bullets": [РОВНО __COUNT__ строк, каждая — короткая фраза до __MAXCHARS__ символов]}
 
 Бриф:
 ---
@@ -269,6 +269,21 @@ MAX_TITLE_WORDS = 9
 MAX_BULLET_CHARS = 72
 
 
+def bullet_char_budget(template_budget):
+    """The item budget for the ALREADY-CHOSEN slide, learned from the template's
+    own sample text (generator.get_item_char_budget), or the flat default.
+
+    A per-slide budget may only TIGHTEN the flat one, never loosen it: the
+    survey templates' body paragraphs are long prose, and their sample text asks
+    for 250-300 char bullets, which would be a regression on every roomy
+    template. Measured budgets on the real corpus: T-Zh mono and universal
+    one-line slots 18, T-Zh study slots 28, prose boxes 70+ (i.e. the flat
+    default, unchanged)."""
+    if not template_budget:
+        return MAX_BULLET_CHARS
+    return min(MAX_BULLET_CHARS, int(template_budget))
+
+
 def _first_sentence(text):
     for sep in (". ", "! ", "? "):
         if sep in text:
@@ -289,7 +304,24 @@ def _guard_widow(text):
     return " ".join(words[:-1]) + " " + words[-1]
 
 
-def _enforce_text_budgets(block, role):
+def _trim_to_budget(item, max_chars):
+    """Cut an over-long item at a WORD boundary, or leave it alone.
+
+    The old cut was `item[:max].rsplit(" ", 1)[0]`, which silently returns the
+    whole slice when the slice holds no space — i.e. it truncates a long single
+    word mid-letter and ships «Клиентоориентирова». Shipping a mutilated word is
+    worse than shipping a long one: the fitter can shrink text, but nothing
+    downstream can put the letters back. So when there is no word boundary to
+    cut at, keep the item whole."""
+    if len(item) <= max_chars:
+        return item
+    head = item[:max_chars]
+    if " " not in head:
+        return item
+    return head.rsplit(" ", 1)[0].rstrip(".,;: ") or item
+
+
+def _enforce_text_budgets(block, role, max_chars=MAX_BULLET_CHARS):
     title = str(block.get("title") or "")
     if len(title.split()) > MAX_TITLE_WORDS:
         title = _first_sentence(title)
@@ -300,10 +332,7 @@ def _enforce_text_budgets(block, role):
         if field in block:
             trimmed = []
             for item in block[field]:
-                item = str(item)
-                if len(item) > MAX_BULLET_CHARS:
-                    cut = item[:MAX_BULLET_CHARS].rsplit(" ", 1)[0]
-                    item = cut.rstrip(".,;: ")
+                item = _trim_to_budget(str(item), max_chars)
                 trimmed.append(_guard_widow(item))
             block[field] = trimmed
     # stats_kpi labels widow too (narrow KPI columns): «Экономия времени на /
@@ -349,20 +378,27 @@ def _reject_duplicate_stats(block, role, used_nums, used_labels):
 
 
 def generate_block(client, role, theme, brief, count=None, models=TEXT_MODELS,
-                   style_preamble="", used_stats=None):
+                   style_preamble="", used_stats=None, item_chars=None):
     """One block, one call, one requirement (the exact count) — sized for the
     already-chosen slide, so nothing needs resizing after the fact.
     style_preamble: the template design brief (plan 9.4), advisory only.
     used_stats: (numbers, labels) already shown on earlier stat slides — asked
     for in the prompt AND enforced by validation+retry, because asking alone
-    doesn't hold (project rule: hard constraints go in code)."""
+    doesn't hold (project rule: hard constraints go in code).
+    item_chars: how long one list item may be on the ALREADY-CHOSEN slide,
+    learned from the template's own sample text (generator.get_item_char_budget)
+    — a 1.93in one-line slot and a full-width prose box are both "a list", and a
+    flat budget makes the narrow one unreadable. Same asked-and-enforced
+    treatment as used_stats."""
     theme_line = f"{theme}\n{style_preamble}" if style_preamble else theme
+    max_chars = bullet_char_budget(item_chars)
     used_nums, used_labels = used_stats or (set(), set())
     prompt = (
         BLOCK_PROMPTS[role]
         .replace("__THEME__", theme_line)
         .replace("__BRIEF__", brief)
         .replace("__COUNT__", str(count or 3))
+        .replace("__MAXCHARS__", str(max_chars))
     )
     if role == "stats_kpi" and (used_nums or used_labels):
         prompt += (
@@ -389,4 +425,4 @@ def generate_block(client, role, theme, brief, count=None, models=TEXT_MODELS,
         # slide is a defect, a crashed iteration is worse. Take the block.
         block = call_with_model_fallback(make_call(False), models)
     block["type"] = role
-    return _enforce_text_budgets(block, role)
+    return _enforce_text_budgets(block, role, max_chars)
