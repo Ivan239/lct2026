@@ -55,7 +55,7 @@ from generator.text_fit import (SINGLE_LINE_SAFETY, estimate_block_height_in,  #
                                 estimate_wrapped_lines, horizontal_margins_in,
                                 vertical_insets_emu)
 from template_parser.parser import extract_theme  # noqa: E402
-from generator.generator import generate, is_chrome_shape  # noqa: E402
+from generator.generator import _pick_title_shape, generate, is_chrome_shape  # noqa: E402
 from matcher.matcher import plan_from_outline  # noqa: E402
 from rendering.render import render_pptx_to_pngs  # noqa: E402
 from template_spec.builder import build_spec  # noqa: E402
@@ -548,6 +548,68 @@ def title_ink_cut_by_its_box(deck_path, renders, plan=None):
     return out
 
 
+# A cover is deliberately louder than a content slide — that is what cover_pt
+# exists for — and a closing echoes it. Comparing them against the content mode
+# reported survey-31's 72pt cover as a defect on the first run.
+_NOT_CONTENT_ROLES = ("title", "closing")
+
+
+def title_sizes(deck_path, source_path=None, plan=None):
+    """Title point sizes across the deck, and how far they stray from its mode.
+
+    Criterion 9.3 («одинаковые размеры заголовков») is scored by eye alone, and
+    the eye is right to be bothered: the universal deck runs 28 / 24 / 29 / 42 /
+    42 / 42, so «Что мешало собирать отчётность вовремя» reads half the size of
+    «Как изменился процесс» two slides later.
+
+    The number is printed WITH the source slide's own size, because the
+    difference is inherited, not invented: slide 2 sits on the template's
+    numbered-grid canvas, whose heading really is 24pt in the template. Whether
+    that is the designer's decision or a size we should normalise is exactly
+    what the pair of numbers is for — the same reason the title gap is printed
+    against the template's own gap rather than judged alone.
+
+    Returns (sizes, mode, [(slide, ours, theirs)]) for the slides that stray.
+    """
+    content = {pos for pos, (block, _) in enumerate(plan or [])
+               if block.get("type") not in _NOT_CONTENT_ROLES}
+    prs = Presentation(deck_path)
+    sizes = []
+    for index, slide in enumerate(prs.slides):
+        if plan and index not in content:
+            sizes.append(None)
+            continue
+        title = _pick_title_shape(slide, set())
+        found = None
+        if title is not None and title.has_text_frame:
+            points = [r.font.size.pt for p in title.text_frame.paragraphs
+                      for r in p.runs if r.font.size and r.text.strip()]
+            found = max(points) if points else None
+        sizes.append(found)
+    known = [s for s in sizes if s]
+    if not known:
+        return None
+    mode = max(set(known), key=known.count)
+
+    source_sizes = {}
+    if source_path and plan:
+        source = Presentation(source_path)
+        slides = list(source.slides)
+        for pos, (_, idx) in enumerate(plan):
+            if isinstance(idx, int) and 0 <= idx < len(slides):
+                title = _pick_title_shape(slides[idx], set())
+                if title is not None and title.has_text_frame:
+                    points = [r.font.size.pt for p in title.text_frame.paragraphs
+                              for r in p.runs if r.font.size and r.text.strip()]
+                    if points:
+                        source_sizes[pos] = max(points)
+
+    stray = [(i + 1, size, source_sizes.get(i))
+             for i, size in enumerate(sizes)
+             if size and abs(size - mode) > mode * 0.25]
+    return known, mode, stray
+
+
 def _median_title_gap_pct(path):
     """Median gap between a slide's title and the content under it, as a share
     of the slide height. None when no slide offers two content boxes."""
@@ -663,6 +725,7 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
         "slots": canvas_slots_used(deck, src, plan),
         "title_gap": title_gap_vs_template(deck, src),
         "title_ink": title_ink_cut_by_its_box(deck, renders, plan),
+        "title_sizes": title_sizes(deck, src, plan),
         "weak": weak,
         "unmeasured": [i + 1 for i, n in
                        enumerate(result["contrast"].get("unmeasured_boxes") or []) if n],
@@ -719,6 +782,11 @@ def main():
                  if r.get("slots") else "")
               + (f"  зазор под титулом {r['title_gap'][0]}% против {r['title_gap'][1]}% у шаблона"
                  if r.get("title_gap") else "")
+              + (("  кегли титулов вразнобой: мода {}pt, но ".format(int(r["title_sizes"][1]))
+                  + "; ".join(f"слайд {n} {int(ours)}pt"
+                              + (f" (у шаблона там {int(theirs)}pt)" if theirs else " (синтез)")
+                              for n, ours, theirs in r["title_sizes"][2]))
+                 if r.get("title_sizes") and r["title_sizes"][2] else "")
               + (("  БОКС ТИТУЛА РЕЖЕТ ТЕКСТ НА РЕНДЕРЕ: "
                   + "; ".join(f"слайд {n} (запас {gap}in)" for n, gap in r["title_ink"]))
                  if r.get("title_ink") else "")
