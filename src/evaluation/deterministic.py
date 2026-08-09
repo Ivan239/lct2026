@@ -191,6 +191,56 @@ def _text_band_emu(shape):
     return box_top, box_bottom
 
 
+# A text block buried under another one. Calibrated, not guessed: across the 217
+# slides of the real corpus the designers' worst overlap is 0.51 (survey-69 tucks
+# «*new question in survey» right under its question, on purpose), while the real
+# defect of iter59 — a subtitle printed through the cover title — scores 1.00,
+# the smaller block sitting entirely inside the larger one's text band.
+TEXT_COLLISION_FRACTION = 0.7
+
+
+def _text_rect(shape, metrics_for):
+    """The rectangle the shape's TEXT occupies: box width (text wraps inside it)
+    by the estimated text band. None when the estimate is not trustworthy."""
+    size_pt = _shape_max_size(shape)
+    font_name = next((r.font.name for r in _shape_runs(shape) if r.font.name), None)
+    metrics = metrics_for(font_name) if font_name else None
+    texts = [t for t in ("".join(r.text for r in p.runs)
+                         for p in shape.text_frame.paragraphs) if t.strip()]
+    if not size_pt or metrics is None or not texts or not shape.width:
+        return None
+    if shape.left is None or shape.top is None or not shape.height:
+        return None
+    line_spacing = next(
+        (p.line_spacing for p in shape.text_frame.paragraphs if p.line_spacing is not None), None)
+    est = int(Inches(estimate_block_height_in(
+        texts, Emu(shape.width).inches, size_pt, metrics=metrics,
+        line_spacing=line_spacing, margins_in=horizontal_margins_in(shape))))
+    top, _ = _text_band_emu(shape)
+    return int(shape.left), top, int(shape.left + shape.width), top + est
+
+
+def _text_collisions(content, metrics_for):
+    """Pairs of content blocks whose TEXT lands on top of other text.
+
+    Not box rectangles: CLAUDE.md records that those intersect by design (51
+    hits on the pristine 69-slide original). Text bands are a different measure —
+    zero hits on four of the five real templates, and on the fifth only the
+    footnotes the designer tucked under a heading on purpose."""
+    rects = [r for r in (_text_rect(s, metrics_for) for s in content) if r]
+    hits = 0
+    for i, a in enumerate(rects):
+        for b in rects[i + 1:]:
+            dx = min(a[2], b[2]) - max(a[0], b[0])
+            dy = min(a[3], b[3]) - max(a[1], b[1])
+            if dx <= 0 or dy <= 0:
+                continue
+            smaller = min((a[2] - a[0]) * (a[3] - a[1]), (b[2] - b[0]) * (b[3] - b[1]))
+            if smaller and dx * dy / smaller >= TEXT_COLLISION_FRACTION:
+                hits += 1
+    return hits
+
+
 def _text_past_edge(shape, W, H, metrics_for):
     """EMU by which the shape's text crosses a slide edge, 0 when it doesn't.
 
@@ -344,6 +394,7 @@ def evaluate(pptx_path, slide_roles=None):
         all_line_sets.append(lines)
 
         overflow = sum(1 for s in content if _overflows(s, metrics_for))
+        collide = _text_collisions(content, metrics_for)
         tiny = sum(1 for s in content if (_shape_max_size(s) or 99) < min_readable_pt)
         oob = 0
         near_edge = 0
@@ -407,6 +458,7 @@ def evaluate(pptx_path, slide_roles=None):
             "n_content": len(content),
             "chars": len(slide_text),
             "overflow": overflow,
+            "collide": collide,
             "tiny": tiny,
             "oob": oob,
             "near_edge": near_edge,
@@ -424,11 +476,25 @@ def evaluate(pptx_path, slide_roles=None):
 
     scores = {}
 
-    # 1.1 readability — overflow + fine print
-    bad = sum(p["overflow"] + p["tiny"] for p in per_slide)
+    # 1.1 readability — fine print (a rate: it degrades a deck gradually) and
+    # text printed through other text (categorical: one such slide cannot be
+    # shown, so it caps the score the way 9.1 does).
+    #
+    # The old formula counted _overflows instead, and that is not a defect
+    # measure: 32 of the 79 boxes of the pristine survey-31 "overflow", 25 of
+    # them marked noAutofit — the designer keeps the frame smaller than the text
+    # on purpose and the renderer simply draws past it. What the spill can
+    # actually do is leave the slide (9.1 measures that since iter60) or land on
+    # other text, which is what is counted here.
+    tiny_total = sum(p["tiny"] for p in per_slide)
+    collided = sum(p["collide"] for p in per_slide)
+    slides_collided = sum(1 for p in per_slide if p["collide"])
+    base = _rate_to_score(tiny_total / total_content)
     scores["1.1"] = {
-        "score": _rate_to_score(bad / total_content),
-        "detail": f"{bad} из {total_content} контентных боксов переполнены/мелкий шрифт",
+        "score": min(base, 2 if slides_collided == 1 else 1) if collided else base,
+        "detail": (f"{tiny_total} из {total_content} контентных боксов мелким шрифтом"
+                   + (f"; {collided} блоков текста поверх другого текста "
+                      f"на {slides_collided} слайдах" if collided else "")),
     }
     # dop_wrap — same overflow signal, framed as wrapping correctness
     of = sum(p["overflow"] for p in per_slide)
