@@ -35,7 +35,17 @@ from qa.geometry import SPARSE_EXEMPT_ROLES, _is_content_shape
 from template_parser.parser import extract_theme
 
 OVERFLOW_TOLERANCE = 1.05          # same slack qa/geometry uses before "it overflows"
-MIN_READABLE_PT = 11.0             # below this, body text reads as fine print
+MIN_READABLE_PT = 11.0             # below this, body text reads as fine print…
+# …on a 16:9 slide of the standard 13.33in width. A point is absolute on paper,
+# but a deck is projected to fill a screen, so what decides readability is the
+# size RELATIVE to the canvas: 10pt on a 10in-wide slide renders exactly as
+# large as 13.3pt on a 13.33in one. All three T-Zh templates are authored at
+# 10x5.62in, and the flat threshold reported NINE boxes of pristine T-Zh mono
+# as fine print — every one of them the deck's own 10pt body copy.
+# In EMU, exactly: the inch value 13.333 is SHORT of the real 12192000 EMU, and
+# the resulting ratio of 1.000025 pushed the threshold to 11.0003pt — enough to
+# reclassify 29 boxes set at exactly 11pt in survey-69 as fine print.
+REFERENCE_SLIDE_WIDTH_EMU = 12192000
 TITLE_MAX_CHARS = 60
 TITLE_MAX_WORDS = 10
 WALL_OF_TEXT_CHARS = 600           # one content box past this is a wall of text
@@ -316,6 +326,7 @@ def evaluate(pptx_path, slide_roles=None):
     all_slide_texts = []
     all_line_sets = []  # per-slide set of normalized content lines, for near-dup
 
+    min_readable_pt = MIN_READABLE_PT * W / REFERENCE_SLIDE_WIDTH_EMU
     designed = _designed_margins(slides, W, H)
     for slide in slides:
         content = _content_shapes(slide)
@@ -333,7 +344,7 @@ def evaluate(pptx_path, slide_roles=None):
         all_line_sets.append(lines)
 
         overflow = sum(1 for s in content if _overflows(s, metrics_for))
-        tiny = sum(1 for s in content if (_shape_max_size(s) or 99) < MIN_READABLE_PT)
+        tiny = sum(1 for s in content if (_shape_max_size(s) or 99) < min_readable_pt)
         oob = 0
         near_edge = 0
         for s in content:
