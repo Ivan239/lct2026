@@ -13,6 +13,7 @@ filler bug. Belt and suspenders, purely local, no LLM.
 from pptx.util import Emu, Inches, Pt
 
 from generator.text_fit import (
+    SOFT_HYPHEN,
     cap_size_to_longest_word,
     estimate_wrapped_lines,
     estimate_block_height_in,
@@ -247,6 +248,47 @@ def keep_text_clear_of_side_art(prs, resolver, slide_indices=None):
                             run.font.size = Pt(float(capped))
             changed.append((slide_idx, shape.shape_id))
     return changed
+
+
+def drop_needless_soft_hyphens(prs, resolver, slide_indices=None):
+    """Remove soft hyphens from words that fit after the final size is known.
+
+    _set_run_text inserts them when the longest word cannot fit at the size it
+    is about to use — a visible hyphen beats a word chopped mid-letter
+    (iter18/25). But enforce_text_fits then shrinks the text further, and at the
+    smaller size the word fits with room to spare: the T-Zh mono heading came
+    out as «Что мешало собирать упра-вленческую отчётность вовремя», where
+    «управленческую» measures 232.6pt against a 293.9pt budget at its final
+    28pt. The renderer breaks at a soft hyphen in preference to wrapping, so a
+    stale one keeps hyphenating a word that no longer needs it.
+
+    Returns the shapes it cleaned."""
+    cleaned = []
+    indices = range(len(prs.slides._sldIdLst)) if slide_indices is None else slide_indices
+    for slide_idx in indices:
+        slide = prs.slides[slide_idx]
+        for shape in slide.shapes:
+            if not shape.has_text_frame or not shape.width:
+                continue
+            if SOFT_HYPHEN not in shape.text_frame.text:
+                continue
+            margins = horizontal_margins_in(shape)
+            for para in shape.text_frame.paragraphs:
+                for run in para.runs:
+                    if SOFT_HYPHEN not in run.text or not run.font.size:
+                        continue
+                    metrics = resolver.metrics_for(run.font.name) if run.font.name else None
+                    if metrics is None:
+                        continue
+                    plain = run.text.replace(SOFT_HYPHEN, "")
+                    fits = cap_size_to_longest_word(
+                        plain, shape.width, run.font.size.pt, min_size_pt=1,
+                        metrics=metrics, margins_in=margins,
+                        bold=bool(run.font.bold))
+                    if float(fits) >= run.font.size.pt:
+                        run.text = plain
+                        cleaned.append((slide_idx, shape.shape_id))
+    return cleaned
 
 
 def enforce_text_fits(prs, resolver, slide_indices=None):
