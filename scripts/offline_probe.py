@@ -207,6 +207,47 @@ def describe(deck_path):
     return comments if comments.startswith(STAMP_MARKER) else "(no stamp)"
 
 
+def build_plan(spec, outline, blocks):
+    """(block, slide_idx) pairs the way the real pipeline builds them.
+
+    Public because every ad-hoc script that assembles a plan by hand has got it
+    wrong the same way: iter42 ignored the plan's `count`, iter56 skipped the
+    character budgets, and an experiment in iter85 skipped them again and read
+    the renderer's own autofit shrink as a product defect. The correct path has
+    to be the easy one.
+    """
+    item_chars = {s["idx"]: s.get("item_chars")
+                  for fam in spec["families"] for s in fam["slides"]}
+    plan = []
+    for item, slide_idx, count in plan_from_outline(outline, spec)[0]:
+        block = dict(blocks[item["role"]])
+        if count:  # honour the capacity the matcher computed
+            for field in ("bullets", "stats", "left_points", "right_points"):
+                if field in block:
+                    block[field] = list(block[field])[:count]
+        block = _enforce_text_budgets(
+            block, item["role"], bullet_char_budget(item_chars.get(slide_idx)))
+        plan.append((block, slide_idx))
+    return plan
+
+
+def repeat_outline(outline, times):
+    """The outline with its CONTENT roles repeated — the axis no preset covers.
+
+    A role used twice sends the matcher back to the same template slide, which
+    is the clone path, where the nastiest bugs of this project lived (orphaned
+    sldId entries and a notesSlide claimed by several slides, both of which made
+    PowerPoint demand repair). One deck of each role never exercises it."""
+    if times <= 1:
+        return outline
+    out = []
+    for item in outline:
+        out.append(item)
+        if item["role"] in ("bullet_list", "stats_kpi", "two_column_comparison"):
+            out.extend(dict(item) for _ in range(times - 1))
+    return out
+
+
 def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
     src = os.path.join(TEMPLATES, f"{template_id}.pptx")
     archetypes, pngs = _cached_parse(template_id)
@@ -225,24 +266,7 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
 
     profile = build_measured_profile(pngs, archetypes) if pngs else None
     spec = build_spec(src, archetypes, style_profile=profile)
-    assignments, _ = plan_from_outline(outline, spec)
-
-    item_chars = {s["idx"]: s.get("item_chars")
-                  for fam in spec["families"] for s in fam["slides"]}
-    plan = []
-    for item, slide_idx, count in assignments:
-        block = dict(blocks[item["role"]])
-        if count:  # honour the capacity the matcher computed — see module docstring
-            for field in ("bullets", "stats", "left_points", "right_points"):
-                if field in block:
-                    block[field] = list(block[field])[:count]
-        # …and the character budget, which the real pipeline applies to every
-        # block (two_phase.generate_block). Skipping it made the probe ship a
-        # 49-character bullet into a slot whose budget is 28 and then report the
-        # 9pt microtext that followed as if it were a product defect.
-        block = _enforce_text_budgets(
-            block, item["role"], bullet_char_budget(item_chars.get(slide_idx)))
-        plan.append((block, slide_idx))
+    plan = build_plan(spec, outline, blocks)
 
     # Cleared BEFORE generating for the same reason it is cleared on a skip: a
     # run that dies half-way leaves the previous deck and renders in place, and
@@ -288,6 +312,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--content", choices=("long", "short", "wordy"), default="long")
     ap.add_argument("--only", default=None, help="probe one template by name")
+    ap.add_argument("--repeat", type=int, default=1,
+                    help="repeat each content role N times — a longer deck, and the only "
+                         "way this probe reaches the clone path")
     ap.add_argument("--items", type=int, default=None,
                     help="how many bullets the brief asks for (default: the outline's 3) "
                          "— changes which template slide the matcher picks")
@@ -304,6 +331,7 @@ def main():
         blocks["bullet_list"]["bullets"] = (pool * 3)[:args.items]
         outline = [dict(item, count=args.items) if item["role"] == "bullet_list" else item
                    for item in OUTLINE]
+    outline = repeat_outline(outline, args.repeat)
     rows = []
     for name, template_id in REAL_TEMPLATES:
         if args.only and args.only != name:
