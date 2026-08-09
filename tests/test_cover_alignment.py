@@ -21,6 +21,7 @@ from fonts.metrics import FontResolver
 from generator.deck_style import apply_observed_style, observe_deck_style
 from generator.generator import _pick_title_shape, _template_cover_pt
 from generator.layout_bounds import infer_content_bounds
+from generator.slide_kit import is_chrome_shape
 from generator.synthesizer import synthesize_title
 from template_parser.parser import extract_template, extract_theme
 
@@ -40,6 +41,11 @@ def _synthesized_cover(template):
     theme["cover_align"] = own.text_frame.paragraphs[0].alignment if own is not None else None
     theme["cover_left"] = int(own.left) if own is not None and own.left is not None else None
     theme["cover_top"] = int(own.top) if own is not None and own.top is not None else None
+    below = [x for x in prs.slides[0].shapes
+             if x.has_text_frame and x.text_frame.text.strip() and own is not None
+             and x.shape_id != own.shape_id and x.top is not None and x.top >= own.top
+             and not is_chrome_shape(x, prs.slide_height)]
+    theme["cover_sub_top"] = int(max(x.top for x in below)) if below else None
     idx = synthesize_title(prs, theme, infer_content_bounds(extract_template(template)), COVER,
                            resolver=FontResolver(template, extract_theme(template)))
     slide = prs.slides[idx]
@@ -81,6 +87,46 @@ def test_cover_takes_its_top_from_the_template_too():
             f"{Emu(own_title.top).inches:.2f}in")
 
 
+@requires(TJ_MONO)
+def test_the_subtitle_sits_where_the_template_puts_its_own():
+    """All three T-Zh covers anchor the subtitle near the BOTTOM edge — 0.19 to
+    0.35in above it — while the gap they leave under the title is 1.21 / 2.55 /
+    2.28in, i.e. no gap at all, just whatever is left. Tucking it under the
+    title left mono's closing with two empty thirds below."""
+    source = Presentation(TJ_MONO)
+    own_title = _pick_title_shape(list(source.slides)[0], set())
+    own_sub = max((x for x in list(source.slides)[0].shapes
+                   if x.has_text_frame and x.text_frame.text.strip()
+                   and x.shape_id != own_title.shape_id and x.top is not None
+                   and not is_chrome_shape(x, source.slide_height)),
+                  key=lambda x: x.top)
+    _, subtitle = _synthesized_cover(TJ_MONO)
+    assert int(subtitle.top) == int(own_sub.top), (
+        f"subtitle at {Emu(subtitle.top).inches:.2f}in, the template's own at "
+        f"{Emu(own_sub.top).inches:.2f}in")
+
+
+@requires(TJ_MONO)
+def test_a_long_title_still_pushes_the_subtitle_below_itself():
+    """The measured position may only move the subtitle DOWN: iter59's collision
+    (a subtitle printed through an overflowing title) must stay impossible."""
+    long_cover = {"title": " ".join(["Запустим пилот в вашем подразделении"] * 3),
+                  "subtitle": COVER["subtitle"]}
+    prs = Presentation(TJ_MONO)
+    theme = apply_observed_style(extract_theme(TJ_MONO), observe_deck_style(prs))
+    own = _pick_title_shape(list(prs.slides)[0], set())
+    theme["cover_pt"] = _template_cover_pt(prs)
+    theme["cover_align"] = own.text_frame.paragraphs[0].alignment
+    theme["cover_left"], theme["cover_top"] = int(own.left), int(own.top)
+    theme["cover_sub_top"] = int(own.top)  # deliberately ABOVE where the title ends
+    idx = synthesize_title(prs, theme, infer_content_bounds(extract_template(TJ_MONO)),
+                           long_cover, resolver=FontResolver(TJ_MONO, extract_theme(TJ_MONO)))
+    boxes = [s for s in prs.slides[idx].shapes if s.has_text_frame and s.text_frame.text.strip()]
+    title = next(s for s in boxes if s.text_frame.text.strip() == long_cover["title"])
+    subtitle = next(s for s in boxes if s.text_frame.text.strip() == long_cover["subtitle"])
+    assert int(subtitle.top) >= int(title.top + title.height)
+
+
 @requires(TJ_UNIVERSAL)
 def test_the_cover_still_fits_the_slide_from_its_new_left_edge():
     """Moving the block right must not push it off the other side: the width is
@@ -97,7 +143,8 @@ def test_a_template_without_a_readable_title_keeps_the_old_placement():
     """The fallback must survive: no measurement, no change in behaviour."""
     prs = Presentation(SURVEY_31)
     theme = apply_observed_style(extract_theme(SURVEY_31), observe_deck_style(prs))
-    theme["cover_align"], theme["cover_left"], theme["cover_top"] = None, None, None
+    theme["cover_align"] = theme["cover_left"] = None
+    theme["cover_top"] = theme["cover_sub_top"] = None
     idx = synthesize_title(prs, theme, infer_content_bounds(extract_template(SURVEY_31)), COVER)
     title = next(s for s in prs.slides[idx].shapes
                  if s.has_text_frame and s.text_frame.text.strip() == COVER["title"])

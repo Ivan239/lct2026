@@ -1591,7 +1591,7 @@ def _template_cover_pt(prs):
 
 
 def _template_cover_layout(prs):
-    """(alignment, left_emu, top_emu) of the template's own COVER title.
+    """(alignment, left_emu, top_emu, subtitle_top_emu) of the template's cover.
 
     Synthesized covers and closings were centred unconditionally in a box inset
     10% from each edge. Measured on the five real templates, EVERY title is left
@@ -1607,16 +1607,31 @@ def _template_cover_layout(prs):
     a flat 38% of the slide height matched exactly one of the five real
     templates. Measured — 26 / 37 / 4 / 22 / 26% — mono opens its cover hard
     against the top edge, and a third of a slide of invented air above the
-    title is not that template."""
+    title is not that template.
+
+    The SUBTITLE is measured too, and it is anchored to the BOTTOM rather than to
+    the title: all three T-Zh covers end their subtitle 0.19-0.35in above the
+    slide edge, while the gap they leave under the title is 1.21 / 2.55 / 2.28in
+    - no gap at all, just whatever is left over. Our synthesis always tucked it
+    under the title, which on mono left the bottom two thirds of the slide
+    empty. None when the cover carries no subtitle (both survey templates)."""
     slides = list(prs.slides)
     if not slides:
-        return None, None, None
-    title = _pick_title_shape(slides[0], set())
+        return None, None, None, None
+    cover = slides[0]
+    title = _pick_title_shape(cover, set())
     if title is None or title.left is None or title.top is None:
-        return None, None, None
+        return None, None, None, None
     paragraphs = title.text_frame.paragraphs
     alignment = paragraphs[0].alignment if paragraphs else None
-    return alignment, int(title.left), int(title.top)
+
+    below = [s for s in cover.shapes
+             if s.has_text_frame and s.text_frame.text.strip()
+             and s.shape_id != title.shape_id and s.top is not None
+             and not is_chrome_shape(s, prs.slide_height)
+             and s.top >= title.top]
+    sub_top = int(max(s.top for s in below)) if below else None
+    return alignment, int(title.left), int(title.top), sub_top
 
 
 def _template_title_pt(prs):
@@ -1696,7 +1711,8 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
                 synth_theme["title_pt"] = _template_title_pt(prs)
                 synth_theme["cover_pt"] = _template_cover_pt(prs)
                 (synth_theme["cover_align"], synth_theme["cover_left"],
-                 synth_theme["cover_top"]) = _template_cover_layout(prs)
+                 synth_theme["cover_top"],
+                 synth_theme["cover_sub_top"]) = _template_cover_layout(prs)
                 bounds_computed = True
             # Measured background of the ORIGINAL canvas slide (from the
             # render), so the synthesizer can rescue text that would land

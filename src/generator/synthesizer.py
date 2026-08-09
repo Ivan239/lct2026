@@ -62,6 +62,7 @@ def _theme_palette(theme):
         "cover_align": theme.get("cover_align"),
         "cover_left": theme.get("cover_left"),
         "cover_top": theme.get("cover_top"),
+        "cover_sub_top": theme.get("cover_sub_top"),
     }
 
 
@@ -647,10 +648,14 @@ def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None
     _style_paragraph(tf.paragraphs[0], t["major_font"], cover_pt, t["accent"], bold=True)
 
     if subtitle:
-        # No clamp against the slide bottom here: the fit above guarantees the
-        # title ends above the reserved band, and a clamp is exactly what put
-        # the subtitle on top of the title when the title overflowed.
-        sub_top = int(title_top + title_box.height + int(Inches(0.2)))
+        # Where the template puts its own — near the bottom edge on all three
+        # T-Zh covers — but never above the title: the fit guarantees the title
+        # ends above the reserved band, and pushing the subtitle up into it is
+        # exactly the collision iter59 removed. So the measured position wins
+        # only when the title actually leaves room for it.
+        under_title = int(title_top + title_box.height + int(Inches(0.2)))
+        measured = t.get("cover_sub_top")
+        sub_top = max(under_title, int(measured)) if measured is not None else under_title
         sub_box = slide.shapes.add_textbox(
             Emu(int(title_left)), Emu(sub_top), title_width, Emu(int(height * 0.12))
         )
