@@ -54,7 +54,7 @@ from generator.text_fit import (SINGLE_LINE_SAFETY, estimate_block_height_in,  #
                                 estimate_wrapped_lines, horizontal_margins_in,
                                 vertical_insets_emu)
 from template_parser.parser import extract_theme  # noqa: E402
-from generator.generator import generate  # noqa: E402
+from generator.generator import generate, is_chrome_shape  # noqa: E402
 from matcher.matcher import plan_from_outline  # noqa: E402
 from rendering.render import render_pptx_to_pngs  # noqa: E402
 from template_spec.builder import build_spec  # noqa: E402
@@ -383,6 +383,57 @@ def boxes_over_at_render_wrap(deck_path, source_path=None, plan=None):
     return over
 
 
+def canvas_slots_used(deck_path, source_path, plan):
+    """The emptiest reused canvas: (filled, offered, slide number).
+
+    A template slide is a GRID of text slots, and we fill a slide by picking
+    shapes from it. When we pick one and blank the rest, the slide keeps the
+    designer's proportions and loses the design: T-Zh mono's numbered-list slide
+    offers six slots — three texts on the right, «01»/«02» beside them, a title
+    — and our bullet_list deck filled two of them, so the render is a heading
+    and one stray paragraph in an otherwise empty slide.
+
+    Nothing in the harness saw that. Geometry was clean (nothing overflows,
+    nothing collides), the evenness criteria exempt sparse slides, and the score
+    stayed at 99.5. A number that nobody prints is a number nobody checks, so
+    this one is printed as a fact next to "из шаблона" — with the slide named,
+    since "2/6" alone is the kind of bare ratio that got misread for twenty
+    iterations.
+
+    Chrome (page numbers, the running header, the year) is excluded: it is
+    furniture on both sides and would flatter the ratio.
+    """
+    if not source_path or not plan:
+        return None
+    source = Presentation(source_path)
+    source_slides = list(source.slides)
+    deck = Presentation(deck_path)
+    deck_slides = list(deck.slides)
+    height = deck.slide_height
+
+    def _content_texts(slide, slide_height):
+        return sum(1 for sh in slide.shapes
+                   if sh.has_text_frame and sh.text_frame.text.strip()
+                   and not is_chrome_shape(sh, slide_height))
+
+    worst = None
+    for pos, (_, idx) in enumerate(plan):
+        if not isinstance(idx, int) or not 0 <= idx < len(source_slides):
+            continue  # synthesized: there is no canvas to leave empty
+        if pos >= len(deck_slides):
+            continue
+        offered = _content_texts(source_slides[idx], source.slide_height)
+        filled = _content_texts(deck_slides[pos], height)
+        if not offered:
+            continue
+        if worst is None or filled / offered < worst[0] / worst[1]:
+            worst = (filled, offered, pos + 1)
+    # Only an UNDER-filled canvas is worth reporting. survey-31's reused slide
+    # offers one slot and gets two (we add a subtitle shape of our own), and
+    # "2/1" as the headline number would read as a defect where there is none.
+    return worst if worst and worst[0] < worst[1] else None
+
+
 def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
     src = os.path.join(TEMPLATES, f"{template_id}.pptx")
     archetypes, pngs = _cached_parse(template_id)
@@ -446,6 +497,7 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
         "native": f"{native}/{len(plan)}",
         "parse": f"{classified}/{len(archetypes)}",
         "over_at_wrap": boxes_over_at_render_wrap(deck, src, plan),
+        "slots": canvas_slots_used(deck, src, plan),
         "weak": weak,
         "unmeasured": [i + 1 for i, n in
                        enumerate(result["contrast"].get("unmeasured_boxes") or []) if n],
@@ -498,6 +550,8 @@ def main():
               + (f"  слабые: {r['weak']}" if r["weak"] else "  слабых нет")
               + (f"  переполнится при рендерном переносе: {r['over_at_wrap']}"
                  if r.get("over_at_wrap") else "")
+              + (f"  слотов канвы {r['slots'][0]}/{r['slots'][1]} (слайд {r['slots'][2]})"
+                 if r.get("slots") else "")
               + (f"  НЕ ПРОВЕРЕН контраст: {r['unmeasured']}"
                  + (f" ({'; '.join(r['unmeasured_why'])})" if r.get("unmeasured_why") else "")
                  if r["unmeasured"] else ""))
