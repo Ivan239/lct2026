@@ -26,3 +26,37 @@ def drop_dangling_function_words(text):
     while words and words[-1].lower().strip(".,;:—-") in DANGLING_TAIL_WORDS:
         words.pop()
     return " ".join(words)
+
+
+# Words that open a new clause: cutting BEFORE one leaves a phrase that ends on
+# its own terms.
+CLAUSE_OPENERS = {"и", "а", "но", "или", "чтобы", "потому", "поэтому", "однако", "либо"}
+
+
+def cut_at_clause(text, max_words):
+    """`text` shortened to at most max_words, cut at a clause boundary.
+
+    A flat word-count cut mangles the sense: «Что мешало собирать управленческую
+    отчётность вовремя и без ручной сверки» came out as «…и без ручной» — a
+    preposition and an adjective with the noun they govern dropped — as the
+    title of a slide, the most visible text on it. Cutting before the «и»
+    instead gives «Что мешало собирать управленческую отчётность вовремя»,
+    which is a title.
+
+    When no boundary lies within the limit the text is returned WHOLE: a long
+    title is readable and now shrinks to fit (iter78), while a mangled one says
+    something the deck does not mean. Same reasoning as iter28's rule about
+    never breaking a word.
+    """
+    words = text.split()
+    if len(words) <= max_words:
+        return text
+    head = words[:max_words]
+    for i in range(len(head) - 1, 0, -1):
+        stripped = head[i].lower().strip(".,;:—-")
+        ends_clause = head[i - 1].endswith(",") or head[i - 1].endswith("—")
+        if stripped in CLAUSE_OPENERS or ends_clause:
+            cut = " ".join(head[:i]).rstrip(".,;:—- ")
+            if cut:
+                return drop_dangling_function_words(cut) or cut
+    return text

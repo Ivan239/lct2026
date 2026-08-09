@@ -16,7 +16,8 @@ import json
 import re
 
 from common.json_utils import extract_json
-from common.phrases import DANGLING_TAIL_WORDS, drop_dangling_function_words
+from common.phrases import (DANGLING_TAIL_WORDS, cut_at_clause,
+                            drop_dangling_function_words)
 from common.model_fallback import TEXT_MODELS, call_with_model_fallback
 from common.synthesis import SYNTHESIZABLE_TYPES
 from template_spec.builder import describe_for_prompt
@@ -341,7 +342,8 @@ def _enforce_text_budgets(block, role, max_chars=MAX_BULLET_CHARS):
     if len(title.split()) > MAX_TITLE_WORDS:
         title = _first_sentence(title)
         if len(title.split()) > MAX_TITLE_WORDS:
-            title = " ".join(title.split()[:MAX_TITLE_WORDS])
+            # At a clause boundary, or not at all — see common.phrases.
+            title = cut_at_clause(title, MAX_TITLE_WORDS)
         block["title"] = title.rstrip(".,;: ")
     for field in ("bullets", "left_points", "right_points"):
         if field in block:
