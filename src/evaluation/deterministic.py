@@ -20,6 +20,7 @@ import re
 from collections import Counter
 
 from pptx import Presentation
+from pptx.enum.text import MSO_ANCHOR
 from pptx.util import Emu, Inches
 
 from fonts.metrics import FontResolver
@@ -163,6 +164,58 @@ def _shape_max_size(shape):
     return max(sizes) if sizes else None
 
 
+def _text_band_emu(shape):
+    """(top, bottom) of the shape's TEXT, not of its box.
+
+    A box is routinely taller than what it holds, and the difference is not a
+    defect: survey-69 slide 6 runs a box to 7.83in on a 7.5in slide while its
+    three paragraphs end at 5.11in. Measuring the box would call the designer's
+    own slide broken — the mistake CLAUDE.md records three times over.
+
+    Only the anchor decides where the text sits inside the box: top-anchored
+    text starts at the top inset, bottom-anchored ends at the bottom one,
+    middle-anchored is centred. Without metrics the estimate is unreliable, so
+    the caller is told nothing rather than something wrong."""
+    top_inset, bottom_inset = vertical_insets_emu(shape)
+    box_top, box_bottom = int(shape.top) + top_inset, int(shape.top + shape.height) - bottom_inset
+    return box_top, box_bottom
+
+
+def _text_past_edge(shape, W, H, metrics_for):
+    """EMU by which the shape's text crosses a slide edge, 0 when it doesn't.
+
+    Left/right come from the box: text wraps inside it, so the box edge IS the
+    text edge. Top/bottom come from the estimated text height — see
+    _text_band_emu for why the box would lie there."""
+    if shape.left is None or shape.top is None or not shape.width or not shape.height:
+        return 0
+    over = max(0, -int(shape.left), int(shape.left + shape.width) - int(W))
+
+    size_pt = _shape_max_size(shape)
+    font_name = next((r.font.name for r in _shape_runs(shape) if r.font.name), None)
+    metrics = metrics_for(font_name) if font_name else None
+    texts = [t for t in ("".join(r.text for r in p.runs)
+                         for p in shape.text_frame.paragraphs) if t.strip()]
+    if not size_pt or metrics is None or not texts:
+        return over  # blind on the vertical axis: say so by measuring nothing
+
+    line_spacing = next(
+        (p.line_spacing for p in shape.text_frame.paragraphs if p.line_spacing is not None), None)
+    est_emu = int(Inches(estimate_block_height_in(
+        texts, Emu(shape.width).inches, size_pt, metrics=metrics,
+        line_spacing=line_spacing, margins_in=horizontal_margins_in(shape))))
+    band_top, band_bottom = _text_band_emu(shape)
+    anchor = shape.text_frame.vertical_anchor
+    if anchor == MSO_ANCHOR.BOTTOM:
+        text_top, text_bottom = band_bottom - est_emu, band_bottom
+    elif anchor == MSO_ANCHOR.MIDDLE:
+        mid = (band_top + band_bottom) // 2
+        text_top, text_bottom = mid - est_emu // 2, mid + est_emu // 2
+    else:
+        text_top, text_bottom = band_top, band_top + est_emu
+    return max(over, -text_top, text_bottom - int(H), 0)
+
+
 def _overflows(shape, metrics_for):
     """True if the shape's text is estimated to exceed its box (would be clipped
     or auto-shrunk by the renderer). Mirrors qa.geometry.enforce_text_fits but
@@ -287,8 +340,7 @@ def evaluate(pptx_path, slide_roles=None):
             if s.left is None or s.top is None or not s.width or not s.height:
                 continue
             l, t, r, b = s.left, s.top, s.left + s.width, s.top + s.height
-            if (l < -OOB_TOLERANCE_FRACTION * W or t < -OOB_TOLERANCE_FRACTION * H
-                    or r > W * (1 + OOB_TOLERANCE_FRACTION) or b > H * (1 + OOB_TOLERANCE_FRACTION)):
+            if _text_past_edge(s, W, H, metrics_for) > OOB_TOLERANCE_FRACTION * min(W, H):
                 oob += 1
             # Tighter than BOTH the generic safe area and the deck's own
             # designed margin — a box level with the rest of the deck is not a
@@ -401,10 +453,19 @@ def evaluate(pptx_path, slide_roles=None):
         "score": _rate_to_score(walls / n) if n else 5,
         "detail": f"{walls} из {n} слайдов со «стеной текста» (>{WALL_OF_TEXT_CHARS} симв.)",
     }
-    # 9.1 out-of-bounds
+    # 9.1 out-of-bounds — by SEVERITY, not by rate. A rate is right for defects
+    # that degrade a deck gradually; text running off the slide is categorical.
+    # The survey cover ran its title to 8.75in on a 7.5in slide with its last
+    # line cut off, and 9.1 scored 5/5 — one bad box among fifteen good ones is
+    # a 6% rate, which rounds to perfect. The deck reported 98.8 while its cover
+    # was sliced in half, for three iterations running.
+    off_slide = sum(p["oob"] for p in per_slide)
+    slides_hit = sum(1 for p in per_slide if p["oob"])
     scores["9.1"] = {
-        "score": _rate_to_score(rate_over_content("oob")),
-        "detail": f"{sum(p['oob'] for p in per_slide)} боксов выходят за границы слайда",
+        "score": 5 if not off_slide else (2 if slides_hit == 1 else 1),
+        "detail": (f"{off_slide} боксов с текстом за границей слайда "
+                   f"на {slides_hit} слайдах" if off_slide
+                   else "текст нигде не выходит за границы слайда"),
     }
     # dop_safe_margins
     scores["dop_safe_margins"] = {
