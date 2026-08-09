@@ -283,7 +283,15 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
              canvas_backgrounds=(profile or {}).get("backgrounds"))
     _stamp(deck, *(stamp or ("?", None)))
     renders = render_pptx_to_pngs(deck, os.path.join(out_dir, "render"))
+    # WITH the roles, as evaluation/loop.py does. Without them the evenness
+    # criteria treat the cover and the closing as content slides and score the
+    # deck uneven for having a cover — the very false positive the exemption
+    # exists to prevent. The probe measured differently from the real loop for
+    # thirty-five iterations, which made every dop_distribution/dop_pacing
+    # number in those reports pessimistic.
+    slide_roles = {pos: block["type"] for pos, (block, _) in enumerate(plan)}
     result = evaluate_deck(deck, brief="offline probe", label=f"probe_{name}",
+                           slide_roles=slide_roles,
                            render_dir=os.path.join(out_dir, "render"),
                            out_json=os.path.join(out_dir, "eval.json"))
     native = sum(1 for _, idx in plan if idx != SYNTHESIZE)
