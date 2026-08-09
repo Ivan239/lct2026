@@ -63,6 +63,7 @@ def _theme_palette(theme):
         "cover_left": theme.get("cover_left"),
         "cover_top": theme.get("cover_top"),
         "cover_sub_top": theme.get("cover_sub_top"),
+        "content_gap_in": theme.get("content_gap_in"),
     }
 
 
@@ -489,7 +490,7 @@ def _decor_obstacles(slide, slide_width, slide_height):
     return spans
 
 
-def _centered_top(content_top, bounds_bottom, est_height_in, obstacles=()):
+def _centered_top(content_top, bounds_bottom, est_height_in, obstacles=(), max_gap_in=None):
     """Top position that vertically centers a content block of the estimated
     height between content_top and the bottom bound. Synthesized slides have no
     designer to fill the lower half — a short block left hanging right under
@@ -513,6 +514,8 @@ def _centered_top(content_top, bounds_bottom, est_height_in, obstacles=()):
     if est >= avail:
         return content_top
     top = int(content_top) + (avail - est) // 2
+    if max_gap_in is not None:
+        top = min(top, int(content_top) + int(Inches(max(0.0, max_gap_in))))
     lo, hi = int(content_top), int(bounds_bottom) - est
 
     def clashes(candidate):
@@ -708,7 +711,8 @@ def synthesize_bullet_list(prs, theme, bounds_in, data, resolver=None, canvas_id
         metrics=_metrics_for(resolver, t["minor_font"]),
     ) + max(0, len(bullets) - 1) * 10 / 72  # space_before between items
     content_top = _centered_top(content_top, b["bottom"], est_in,
-                                _decor_obstacles(slide, prs.slide_width, prs.slide_height))
+                                _decor_obstacles(slide, prs.slide_width, prs.slide_height),
+                                max_gap_in=t.get("content_gap_in"))
     content_height = max(Emu(int(Inches(0.5))), Emu(b["bottom"] - content_top))
 
     _add_bulleted_textbox(
@@ -726,7 +730,8 @@ def synthesize_stats_kpi(prs, theme, bounds_in, data, resolver=None, canvas_idx=
     content_top = Emu(title_box.top + title_box.height + Emu(int(Inches(0.35))))
     # Number box (0.9") + label offset (1.0") + label box (0.8") — fixed layout.
     content_top = _centered_top(content_top, b["bottom"], 1.8,
-                                _decor_obstacles(slide, prs.slide_width, prs.slide_height))
+                                _decor_obstacles(slide, prs.slide_width, prs.slide_height),
+                                max_gap_in=t.get("content_gap_in"))
 
     stats = data.get("stats", [])
     if stats:
@@ -782,7 +787,8 @@ def synthesize_two_column_comparison(prs, theme, bounds_in, data, resolver=None,
         )
     )
     col_top = _centered_top(col_top, b["bottom"], est_in,
-                            _decor_obstacles(slide, prs.slide_width, prs.slide_height))
+                            _decor_obstacles(slide, prs.slide_width, prs.slide_height),
+                            max_gap_in=t.get("content_gap_in"))
     col_height = Emu(b["bottom"] - col_top)
 
     for left, heading, points in (

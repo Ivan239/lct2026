@@ -1,3 +1,4 @@
+import statistics
 from collections import Counter
 
 from pptx import Presentation
@@ -1883,6 +1884,41 @@ def _template_cover_pt(prs):
     return round(pt) if pt else None
 
 
+def _template_content_gap_in(prs):
+    """The gap the template leaves between a title and the content under it, in
+    inches — the MEDIAN over its own content slides, or None.
+
+    Synthesized slides centre their block in whatever band is left, which on a
+    short block detaches the heading from what it introduces. The five real
+    templates measure 0.00 / 0.06 / 0.20 / 0.25 / 1.12in — T-Zh mono really does
+    hold its content low, so a flat "hug the title" would be as wrong as a flat
+    "always centre". The number is the template's, like cover_pt and the cover's
+    left margin.
+
+    Chrome is excluded on both ends, and a slide needs two content boxes before
+    it can say anything about the gap between them.
+    """
+    height = prs.slide_height
+    gaps = []
+    for slide in prs.slides:
+        boxes = []
+        for shape in slide.shapes:
+            if not shape.has_text_frame or not shape.text_frame.text.strip():
+                continue
+            if shape.top is None or shape.height is None:
+                continue
+            if is_chrome_shape(shape, height):
+                continue
+            boxes.append((int(shape.top), int(shape.top) + int(shape.height)))
+        if len(boxes) < 2:
+            continue
+        boxes.sort()
+        gaps.append(Emu(max(0, boxes[1][0] - boxes[0][1])).inches)
+    if not gaps:
+        return None
+    return round(statistics.median(gaps), 2)
+
+
 def _template_cover_layout(prs):
     """(alignment, left_emu, top_emu, subtitle_top_emu) of the template's cover.
 
@@ -2003,6 +2039,7 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
                 # at the deck's own title size instead of a flat 32pt.
                 synth_theme["title_pt"] = _template_title_pt(prs)
                 synth_theme["cover_pt"] = _template_cover_pt(prs)
+                synth_theme["content_gap_in"] = _template_content_gap_in(prs)
                 (synth_theme["cover_align"], synth_theme["cover_left"],
                  synth_theme["cover_top"],
                  synth_theme["cover_sub_top"]) = _template_cover_layout(prs)
