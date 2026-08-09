@@ -109,18 +109,38 @@ def test_the_wrap_overflow_count_ignores_the_designers_own_boxes(tmp_path):
     from pptx import Presentation
     from pptx.util import Emu, Inches, Pt
 
+    from fonts.metrics import FontResolver
+    from generator.text_fit import SINGLE_LINE_SAFETY, _usable_width_in
+    from template_parser.parser import extract_theme
+
+    # The box has to sit ON the wrap boundary, since that is what the counter
+    # measures: a box whose text is simply taller than its frame is the
+    # designer's own habit and is not counted at all (see
+    # test_probe_wrap_overflow.py). The first fixture here was a 28pt line in a
+    # 3in box — over its frame at every width, so it stopped being counted when
+    # the measure was narrowed, and the test failed for a reason that had
+    # nothing to do with what it guards.
+    text = "Собственный текст дизайнера, и это его право"
+    size_pt = 18
     source = str(tmp_path / "src.pptx")
-    prs = Presentation()
-    prs.slide_width, prs.slide_height = Emu(int(Inches(10))), Emu(int(Inches(5.62)))
-    slide = prs.slides.add_slide(prs.slide_layouts[6])
-    box = slide.shapes.add_textbox(Emu(int(Inches(0.3))), Emu(int(Inches(0.3))),
-                                   Emu(int(Inches(3.0))), Emu(int(Inches(0.4))))
-    box.text_frame.word_wrap = True
-    box.text_frame.text = ("Собственный длинный текст дизайнера, который заведомо "
-                           "не помещается в свою рамку и это его право")
-    box.text_frame.paragraphs[0].runs[0].font.size = Pt(28)
-    box.text_frame.paragraphs[0].runs[0].font.name = "Arial"
-    prs.save(source)
+
+    def _build(width_in):
+        prs = Presentation()
+        prs.slide_width, prs.slide_height = Emu(int(Inches(10))), Emu(int(Inches(5.62)))
+        slide = prs.slides.add_slide(prs.slide_layouts[6])
+        box = slide.shapes.add_textbox(Emu(int(Inches(0.3))), Emu(int(Inches(0.3))),
+                                       Emu(int(Inches(width_in))), Emu(int(Inches(0.4))))
+        box.text_frame.word_wrap = True
+        box.text_frame.text = text
+        box.text_frame.paragraphs[0].runs[0].font.size = Pt(size_pt)
+        box.text_frame.paragraphs[0].runs[0].font.name = "Arial"
+        prs.save(source)
+
+    _build(3.0)
+    metrics = FontResolver(source, extract_theme(source)).metrics_for("Arial")
+    insets = 3.0 - _usable_width_in(3.0)
+    drawn_in = metrics.text_width_pt(text, size_pt) / 72
+    _build(drawn_in / ((1 + SINGLE_LINE_SAFETY) / 2) + insets)
 
     counted_all = probe.boxes_over_at_render_wrap(source)
     assert counted_all >= 1, "fixture: the box is supposed to overflow"

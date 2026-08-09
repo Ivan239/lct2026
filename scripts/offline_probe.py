@@ -51,7 +51,8 @@ from evaluation.evaluate import evaluate_deck  # noqa: E402
 from evaluation.loop import _synth_canvas_hints  # noqa: E402
 from fonts.metrics import FontResolver  # noqa: E402
 from generator.text_fit import (SINGLE_LINE_SAFETY, estimate_block_height_in,  # noqa: E402
-                                horizontal_margins_in, vertical_insets_emu)
+                                estimate_wrapped_lines, horizontal_margins_in,
+                                vertical_insets_emu)
 from template_parser.parser import extract_theme  # noqa: E402
 from generator.generator import generate  # noqa: E402
 from matcher.matcher import plan_from_outline  # noqa: E402
@@ -312,6 +313,22 @@ def boxes_over_at_render_wrap(deck_path, source_path=None, plan=None):
     belonged to the designer. Text that also appears on the source slide is
     skipped.
 
+    Counts the boxes the EARLY WRAP breaks, and only those. The first version
+    counted every box whose estimated text was taller than its frame, and that
+    is a different — much commoner, and mostly harmless — thing: the T-Zh
+    universal deck scored 15, of which 13 were one-liners missing their frame by
+    0.01in (an 8pt «2025» in a 0.12in box, a 24pt «-40%» in a 0.36in one),
+    because a designer sizes a box to the cap height, not to the font's full
+    line box. Those cannot be made better by any wrap margin — nothing wraps.
+    So a box counts only when the safety-reduced width costs it a LINE that the
+    full width did not, which is exactly what a margin in enforce_text_fits
+    would prevent. Same rule as 1.1 (CLAUDE.md): "estimate taller than frame" is
+    not a defect measure.
+
+    Every paragraph is measured at ITS OWN size. Charging them all the box's
+    largest run is what produced most of the rest: on a KPI card the 11pt
+    caption was wrapped at 24pt, the number's size.
+
     Reported, not fixed: adding the margin inside enforce_text_fits would shrink
     the designer's boxes too. This number says how often it happens to us, so a
     change can be judged rather than guessed at.
@@ -333,21 +350,34 @@ def boxes_over_at_render_wrap(deck_path, source_path=None, plan=None):
         for shape in slide.shapes:
             if not shape.has_text_frame or not shape.width or not shape.height:
                 continue
-            texts = [t for t in (p.text for p in shape.text_frame.paragraphs) if t.strip()]
-            sizes = [r.font.size.pt for p in shape.text_frame.paragraphs
-                     for r in p.runs if r.font.size and r.text.strip()]
+            paragraphs = [(p, next((r.font.size.pt for r in p.runs
+                                    if r.font.size and r.text.strip()), None))
+                          for p in shape.text_frame.paragraphs if p.text.strip()]
+            paragraphs = [(p, size) for p, size in paragraphs if size]
             font = next((r.font.name for p in shape.text_frame.paragraphs
                          for r in p.runs if r.font.name), None)
             metrics = metrics_for(font) if font else None
-            if not texts or not sizes or metrics is None:
+            if not paragraphs or metrics is None:
                 continue
             if " ".join(shape.text_frame.text.split()) in template_texts:
                 continue  # the designer's own text, in the designer's own box
+            margins = horizontal_margins_in(shape)
+            width_in = Emu(shape.width).inches
+            costs_a_line = any(
+                estimate_wrapped_lines(p.text, width_in * SINGLE_LINE_SAFETY, size,
+                                       metrics=metrics, margins_in=margins)
+                > estimate_wrapped_lines(p.text, width_in, size,
+                                         metrics=metrics, margins_in=margins)
+                for p, size in paragraphs)
+            if not costs_a_line:
+                continue
             top_inset, bottom_inset = vertical_insets_emu(shape)
             usable = Emu(max(0, shape.height - top_inset - bottom_inset)).inches
-            drawn = estimate_block_height_in(
-                texts, Emu(shape.width).inches * SINGLE_LINE_SAFETY, max(sizes),
-                metrics=metrics, margins_in=horizontal_margins_in(shape))
+            drawn = sum(
+                estimate_block_height_in(
+                    [p.text], width_in * SINGLE_LINE_SAFETY, size, metrics=metrics,
+                    line_spacing=p.line_spacing, margins_in=margins)
+                for p, size in paragraphs)
             if drawn > usable:
                 over += 1
     return over
