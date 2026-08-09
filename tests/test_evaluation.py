@@ -973,3 +973,30 @@ def test_report_names_blind_spots_even_when_nothing_scored_low():
 
     blind = format_report(dict(base, contrast={"unmeasured_boxes": [0, 2, 0]}))
     assert "Не проверено" in blind and "[2]" in blind, blind
+
+
+def test_gigachat_backend_is_queued_when_the_oauth_host_is_unreachable(monkeypatch):
+    """An unreachable backend should be "queued", not a run that dies ten
+    minutes later. Measured: the OAuth host was unreachable for 34 consecutive
+    loop iterations, and each run spent 5-16 minutes on connect timeouts and the
+    model fallback chain before failing; a probe answers in about 3 seconds.
+
+    RTX already worked this way — this puts GigaChat on the same footing, and
+    leaves the reachable path untouched."""
+    import pytest
+
+    from llm_clients import backends
+
+    monkeypatch.setattr(backends, "_reachable", lambda url, timeout=4: False)
+    with pytest.raises(backends.BackendUnavailable) as err:
+        backends.resolve("GigaChat-2-Max")
+    assert "недоступен по сети" in str(err.value)
+
+    # The reachable path must NOT be blocked. The real client needs credentials
+    # to construct, so it is stubbed — building it is not what this test is
+    # about, and depending on it made the assertion pass only because an earlier
+    # test had already built the module singleton.
+    monkeypatch.setattr(backends, "_reachable", lambda url, timeout=4: True)
+    monkeypatch.setattr(backends, "_gigachat", lambda: "client")
+    client, name = backends.resolve("GigaChat-2-Max")
+    assert (client, name) == ("client", "GigaChat-2-Max")

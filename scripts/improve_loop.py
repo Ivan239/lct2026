@@ -121,7 +121,10 @@ def main():
     try:
         gen_client, model_name = backends.resolve(requested)
     except backends.BackendUnavailable as e:
-        print(f"[loop] модель {requested} в очереди: {e}")
+        # "пропущено по сети" is the phrase the loop's own contract uses for
+        # this case, so it is greppable in the logs.
+        note = "пропущено по сети" if "недоступен по сети" in str(e) else "в очереди"
+        print(f"[loop] {note}: модель {requested} — {e}")
         return
     source_name = os.path.splitext(os.path.basename(source))[0]
     print(f"[loop] model={model_name} source={source_name}", flush=True)

@@ -16,7 +16,7 @@ import os
 
 import requests
 
-from llm_clients.gigachat import GigaChatClient
+from llm_clients.gigachat import OAUTH_URL, GigaChatClient
 from llm_clients.openai_compat import OpenAICompatClient
 
 GIGACHAT_MODELS = ["GigaChat-2", "GigaChat-2-Pro", "GigaChat-2-Max", "GigaChat-3-Ultra"]
@@ -35,6 +35,10 @@ def _gigachat():
     if _gigachat_singleton is None:
         _gigachat_singleton = GigaChatClient(verify_ssl=False)
     return _gigachat_singleton
+
+
+# Short on purpose: this is a liveness probe, not the request.
+REACH_TIMEOUT = 4
 
 
 def _reachable(url, timeout=4):
@@ -60,6 +64,15 @@ def resolve(model):
     """Return (gen_client, model_name) for `model`, or raise BackendUnavailable.
     `model` is a GigaChat tier name, or "rtx" / "rtx:<name>" for the RTX box."""
     if model in GIGACHAT_MODELS:
+        # Same treatment RTX already gets: an unreachable backend is "queued",
+        # not a run that dies ten minutes later. The OAuth host has been
+        # unreachable for 34 consecutive loop iterations, and each one spent
+        # 5-16 minutes working through connect timeouts and the model fallback
+        # chain before failing — a probe answers in 3 seconds. On a reachable
+        # host nothing changes: the probe passes and the real request follows.
+        if not _reachable(OAUTH_URL, timeout=REACH_TIMEOUT):
+            raise BackendUnavailable(
+                f"GigaChat недоступен по сети: {OAUTH_URL} не отвечает")
         return _gigachat(), model
 
     if model == "rtx" or model.startswith("rtx:"):
