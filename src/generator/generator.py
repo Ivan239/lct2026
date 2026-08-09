@@ -70,6 +70,31 @@ def _placeholder(slide, idx, claimed_ids):
     return None if ph.shape_id in claimed_ids else ph
 
 
+_FIGURE_CHARS = set("0123456789+-%×x/.,")
+# A display figure is never the title, however large it is set. The position
+# discount below is not enough on its own: iter70 gave the figure the size the
+# template sets it at (72pt against an 18pt heading on the T-Zh study deck), and
+# half of 72 still beats 18 — so the harness read «-40%» as the slide's title
+# and reported the real heading as a stray widow. Measured across the corpus,
+# exactly three slides pick a figure today, including the universal template's
+# own «20 227 000».
+_FIGURE_SCORE_DISCOUNT = 0.2
+
+
+def _is_display_figure(shape):
+    """True when the shape's text is mostly digits and arithmetic marks.
+
+    Deliberately not "short and contains a digit": «Top 7» is a heading on a
+    real template and would have been caught by that. Half the non-space
+    characters must be figure characters, which «Top 7» (25%) and «4 дня» (25%)
+    are not, and «-40%», «+18», «x3», «20 227 000» are."""
+    text = shape.text_frame.text.strip() if shape.has_text_frame else ""
+    core = "".join(text.split())
+    if not core:
+        return False
+    return sum(1 for c in core if c in _FIGURE_CHARS) / len(core) >= 0.5
+
+
 def _pick_title_shape(slide, claimed_ids):
     """Prefer a real title placeholder; otherwise the largest text shape in the
     TOP BAND of the slide's content. Font size alone is not enough: on a
@@ -88,10 +113,15 @@ def _pick_title_shape(slide, claimed_ids):
     tops = [s.top or 0 for s in candidates]
     bottoms = [(s.top or 0) + (s.height or 0) for s in candidates]
     band_limit = min(tops) + (max(bottoms) - min(tops)) * 0.25
-    return max(
-        candidates,
-        key=lambda s: (_max_font_pt(s) * (1.0 if (s.top or 0) <= band_limit else 0.5), -(s.top or 0)),
-    )
+    def score(shape):
+        size = _max_font_pt(shape) or 0
+        if (shape.top or 0) > band_limit:
+            size *= 0.5
+        if _is_display_figure(shape):
+            size *= _FIGURE_SCORE_DISCOUNT
+        return size, -(shape.top or 0)
+
+    return max(candidates, key=score)
 
 
 def _pick_body_shape(slide, claimed_ids):
