@@ -19,8 +19,15 @@ Two things it deliberately does that the earlier throwaway probes got wrong:
    renders showed 8pt microtext (iter51) and decor sitting on a KPI figure
    (iter52). `--content short` is kept for comparing the two.
 
+3. It can vary the ITEM COUNT. The plan's capacity match decides which template
+   slide a role lands on, so a fixed brief only ever exercises one branch: with
+   three bullets the universal template hands the list to its prose slide
+   (capacity 3) and its designed 6-cell numbered grid — a whole layout — had
+   never been rendered by this probe. `--items 5` reaches it.
+
 Usage:
     .venv/bin/python3 scripts/offline_probe.py [--content long|short] [--only NAME]
+                                               [--items N]
 """
 
 import argparse
@@ -120,7 +127,7 @@ def _cached_parse(template_id):
     return None, None
 
 
-def probe(name, template_id, blocks, out_root):
+def probe(name, template_id, blocks, out_root, outline=OUTLINE):
     src = os.path.join(TEMPLATES, f"{template_id}.pptx")
     archetypes, pngs = _cached_parse(template_id)
     if archetypes is None:
@@ -128,7 +135,7 @@ def probe(name, template_id, blocks, out_root):
 
     profile = build_measured_profile(pngs, archetypes) if pngs else None
     spec = build_spec(src, archetypes, style_profile=profile)
-    assignments, _ = plan_from_outline(OUTLINE, spec)
+    assignments, _ = plan_from_outline(outline, spec)
 
     item_chars = {s["idx"]: s.get("item_chars")
                   for fam in spec["families"] for s in fam["slides"]}
@@ -173,15 +180,27 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--content", choices=("long", "short"), default="long")
     ap.add_argument("--only", default=None, help="probe one template by name")
+    ap.add_argument("--items", type=int, default=None,
+                    help="how many bullets the brief asks for (default: the outline's 3) "
+                         "— changes which template slide the matcher picks")
     ap.add_argument("--out", default=OUT_ROOT)
     args = ap.parse_args()
 
     blocks = LONG if args.content == "long" else SHORT
+    outline = OUTLINE
+    if args.items:
+        blocks = {k: dict(v) for k, v in blocks.items()}
+        extra = ["Отчёты собирались вручную в конце месяца",
+                 "Данные расходились между системами"]
+        pool = list(blocks["bullet_list"]["bullets"]) + extra
+        blocks["bullet_list"]["bullets"] = (pool * 3)[:args.items]
+        outline = [dict(item, count=args.items) if item["role"] == "bullet_list" else item
+                   for item in OUTLINE]
     rows = []
     for name, template_id in REAL_TEMPLATES:
         if args.only and args.only != name:
             continue
-        rows.append(probe(name, template_id, blocks, args.out))
+        rows.append(probe(name, template_id, blocks, args.out, outline))
 
     print(f"\n# Офлайн-прогон, контент: {args.content}\n")
     for r in rows:
