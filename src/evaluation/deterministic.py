@@ -26,6 +26,7 @@ from pptx.util import Emu, Inches
 from fonts.metrics import FontResolver
 from generator.generator import _pick_body_shape, _pick_title_shape
 from generator.text_fit import (
+    cap_size_to_longest_word,
     estimate_block_height_in,
     horizontal_margins_in,
     vertical_insets_emu,
@@ -197,6 +198,33 @@ def _text_band_emu(shape):
 # defect of iter59 — a subtitle printed through the cover title — scores 1.00,
 # the smaller block sitting entirely inside the larger one's text band.
 TEXT_COLLISION_FRACTION = 0.7
+
+
+def _breaks_a_word(shape, metrics_for):
+    """True when the shape's longest WORD cannot fit its usable width, so the
+    renderer has no choice but to break it mid-letter («Автоматизаци/я» on a real
+    51pt title, «подключённых клиентов е-/жемесячно» on a KPI caption).
+
+    This is what «некорректный перенос» actually means. It replaces _overflows,
+    which measured «text taller than its box» — a designer habit, not a defect:
+    32 of the 79 boxes of the pristine survey-31 are like that, 25 of them marked
+    noAutofit. Measured on the same corpus, this signal fires 0 times on seven
+    templates and once on the eighth (survey-69's footnote in a narrow box)."""
+    size_pt = _shape_max_size(shape)
+    font_name = next((r.font.name for r in _shape_runs(shape) if r.font.name), None)
+    metrics = metrics_for(font_name) if font_name else None
+    text = shape.text_frame.text
+    if not size_pt or metrics is None or not text.strip() or not shape.width:
+        return False
+    bold = any(r.font.bold for r in _shape_runs(shape) if r.font.bold)
+    capped = cap_size_to_longest_word(
+        text, shape.width, size_pt, metrics=metrics,
+        margins_in=horizontal_margins_in(shape), bold=bool(bold))
+    # Against the ROUNDED base: cap_size_to_longest_word starts from
+    # round(size_pt), so a 10.5pt box comes back as 10 with nothing shrunk at
+    # all. That alone was the single «designer defect» in the whole corpus —
+    # survey-69's 10.5pt footnote, which the render shows sitting on one line.
+    return float(capped) < round(size_pt)
 
 
 def _text_rect(shape, metrics_for):
@@ -395,6 +423,7 @@ def evaluate(pptx_path, slide_roles=None):
 
         overflow = sum(1 for s in content if _overflows(s, metrics_for))
         collide = _text_collisions(content, metrics_for)
+        word_break = sum(1 for s in content if _breaks_a_word(s, metrics_for))
         tiny = sum(1 for s in content if (_shape_max_size(s) or 99) < min_readable_pt)
         oob = 0
         near_edge = 0
@@ -459,6 +488,7 @@ def evaluate(pptx_path, slide_roles=None):
             "chars": len(slide_text),
             "overflow": overflow,
             "collide": collide,
+            "word_break": word_break,
             "tiny": tiny,
             "oob": oob,
             "near_edge": near_edge,
@@ -496,11 +526,19 @@ def evaluate(pptx_path, slide_roles=None):
                    + (f"; {collided} блоков текста поверх другого текста "
                       f"на {slides_collided} слайдах" if collided else "")),
     }
-    # dop_wrap — same overflow signal, framed as wrapping correctness
-    of = sum(p["overflow"] for p in per_slide)
+    # dop_wrap — a word the renderer must break mid-letter. Was the _overflows
+    # count, which reported 32 of 79 boxes of a pristine designer deck as badly
+    # wrapped and scored it 3/5; see _breaks_a_word.
+    broken = sum(p["word_break"] for p in per_slide)
+    slides_broken = sum(1 for p in per_slide if p["word_break"])
+    # Categorical, like 9.1: a word chopped mid-letter is visible on that slide
+    # whatever the rest of the deck does. Safe to score this way only because
+    # the signal is exactly 0 across all 217 slides of the real corpus — a rate
+    # would bury it (one box among eleven scored a clean 5 in the check).
     scores["dop_wrap"] = {
-        "score": _rate_to_score(of / total_content),
-        "detail": f"{of} боксов с некорректным переносом (текст не влезает)",
+        "score": 5 if not broken else (2 if slides_broken == 1 else 1),
+        "detail": (f"{broken} боксов, где слово рвётся посреди, на {slides_broken} слайдах"
+                   if broken else "слова нигде не рвутся посреди"),
     }
     # dop_orphans
     total_ml = sum(p["multiline"] for p in per_slide)
@@ -568,10 +606,13 @@ def evaluate(pptx_path, slide_roles=None):
         "score": _rate_to_score(affected / n) if n else 5,
         "detail": f"{dup_slides} точных + {near_dup} смысловых дублей слайдов",
     }
-    # dop_text_split — overflow means content should have been split further
+    # dop_text_split — walls of text mean the content should have been split
+    # further. The overflow term is gone with the rest: it took this criterion to
+    # 1/5 on pristine designer templates, the harshest false verdict in the
+    # harness, purely for frames the designer drew smaller than their text.
     scores["dop_text_split"] = {
-        "score": _rate_to_score((of + walls) / (n or 1)),
-        "detail": f"{of} переполнений + {walls} стен текста как признак плохого разбиения",
+        "score": _rate_to_score(walls / (n or 1)),
+        "detail": f"{walls} из {n} слайдов со «стеной текста» — признак плохого разбиения",
     }
     # dop_distribution / dop_pacing — evenness across CONTENT slides only. Title,
     # divider and closing are sparse BY DESIGN (a divider is one phrase); counting
