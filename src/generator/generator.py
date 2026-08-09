@@ -27,7 +27,7 @@ from generator.text_fit import (
     paragraph_pitch_pt,
     vertical_insets_emu,
 )
-from qa.geometry import enforce_text_fits, harmonize_clone_font_sizes
+from qa.geometry import MIN_READABLE_PT, enforce_text_fits, harmonize_clone_font_sizes
 from qa.package_check import assert_valid_package
 from template_parser.parser import extract_template, extract_theme
 
@@ -1065,6 +1065,50 @@ def _stats_title_shape(slide, claimed_ids):
     return min(candidates, key=lambda s: s.top)
 
 
+# A display figure's caption reads as a caption at about a third of it; below
+# the readability floor the number is too big for its box anyway and the fitters
+# will pull both down together.
+_DISPLAY_LABEL_RATIO = 0.33
+
+
+def _fill_display_stat(shape, pair, claimed_ids, resolver=None):
+    """Number big, label under it — the treatment a one-big-number slide has."""
+    number, label = str(pair[0]), str(pair[1])
+    reference = _dominant_reference_run(shape) or _reference_run(shape)
+    base = _max_font_pt(shape) or (reference.font.size.pt if reference and reference.font.size else 40)
+    metrics = _metrics_for_run(reference, resolver)
+    number_pt = cap_size_to_longest_word(
+        number, shape.width, base, metrics=metrics,
+        margins_in=horizontal_margins_in(shape), bold=True)
+
+    # Fit the PAIR up front. enforce_text_fits shrinks by clamping every run to
+    # one size, so a pair that arrives too tall comes back flattened — measured:
+    # 82pt over 27pt became 24pt over 24pt, and the hierarchy this whole branch
+    # exists for was gone.
+    top_inset, bottom_inset = vertical_insets_emu(shape)
+    usable_in = Emu(max(0, shape.height - top_inset - bottom_inset)).inches
+    width_in = Emu(shape.width).inches
+    margins = horizontal_margins_in(shape)
+    spacing = _shape_line_spacing(shape)
+    while number_pt > MIN_READABLE_PT:
+        label_pt = max(MIN_READABLE_PT, round(number_pt * _DISPLAY_LABEL_RATIO))
+        est = (estimate_block_height_in([number], width_in, number_pt, metrics=metrics,
+                                        line_spacing=spacing, margins_in=margins)
+               + estimate_block_height_in([label], width_in, label_pt, metrics=metrics,
+                                          line_spacing=spacing, margins_in=margins))
+        if est <= usable_in:
+            break
+        number_pt -= 2
+    label_pt = max(MIN_READABLE_PT, round(number_pt * _DISPLAY_LABEL_RATIO))
+
+    _set_paragraph_texts(shape, [number, label], claimed_ids, resolver=resolver)
+    paragraphs = [p for p in shape.text_frame.paragraphs if "".join(r.text for r in p.runs).strip()]
+    for para, size, bold in zip(paragraphs, (number_pt, label_pt), (True, False)):
+        for run in para.runs:
+            run.font.size = Pt(size)
+            run.font.bold = bold
+
+
 def _fill_stats_kpi(slide, data, claimed_ids, resolver=None):
     title_shape = _stats_title_shape(slide, claimed_ids)
     _set_run_text(title_shape, data.get("title", ""), claimed_ids, resolver=resolver)
@@ -1094,8 +1138,19 @@ def _fill_stats_kpi(slide, data, claimed_ids, resolver=None):
         # Same icon-marker pattern as bullet_list (see _fill_bullet_list) — reuse
         # the same detection/repositioning so the icons actually track the new
         # line count instead of staying planted at the original text's spacing.
-        lines = [f"{num} — {label}" for num, label in stats]
         icons = _find_bullet_icons(slide, boxes[0])
+        if (len(stats) == 1 and not icons
+                and _is_display_sized(boxes[0], title_shape)):
+            # A display-sized single box is a ONE BIG NUMBER slide (the same
+            # slide get_capacity gives capacity 1, iter42). Writing
+            # "«-40%» — времени на подготовку регулярной отчётности" as one run
+            # at one size loses exactly that: the render showed a two-line
+            # headline sentence where the template shows «20 227 000» alone at
+            # 82pt. Number at the box's own display size, label under it at a
+            # third of it — the fitters shrink from there if it does not fit.
+            _fill_display_stat(boxes[0], stats[0], claimed_ids, resolver=resolver)
+            return
+        lines = [f"{num} — {label}" for num, label in stats]
         font_size_pt = _set_paragraph_texts(
             boxes[0], lines, claimed_ids, resolver=resolver, allow_center=not icons,
             prefer_single_line=bool(icons),

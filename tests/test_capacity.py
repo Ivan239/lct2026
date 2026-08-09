@@ -102,3 +102,34 @@ def test_a_one_big_number_stats_slide_has_capacity_one():
     assert get_capacity(universal[9], "stats_kpi") == 4, "the KPI board must be untouched"
     assert get_capacity(universal[8], "stats_kpi") is None, (
         "an unsized body must keep the conservative answer, not a guessed 1")
+
+
+@requires(TJ_TEMPLATE)
+def test_a_one_big_number_slide_sets_number_and_label_apart(tmp_path):
+    """iter42 gave this slide capacity 1; the format was still wrong. The single
+    pair was written as one run — "-40% — времени на подготовку регулярной
+    отчётности" — at one size, so the render showed a two-line headline sentence
+    where the template shows «20 227 000» alone at 82pt. A KPI needs the figure
+    to read as a figure.
+
+    The pair is fitted to the box UP FRONT, because enforce_text_fits shrinks by
+    clamping every run to a single size: a pair that arrives too tall comes back
+    flattened, and 82pt over 27pt became 24pt over 24pt."""
+    from generator.generator import generate
+
+    out = str(tmp_path / "display.pptx")
+    generate(TJ_TEMPLATE,
+             [({"type": "stats_kpi", "title": "Результаты",
+                "stats": [["-40%", "времени на подготовку регулярной отчётности"]]}, 8)],
+             out)
+
+    slide = list(Presentation(out).slides)[0]
+    body = [s for s in slide.shapes if s.has_text_frame and "-40%" in s.text_frame.text]
+    assert body, "the stat vanished"
+    paragraphs = [p for p in body[0].text_frame.paragraphs
+                  if "".join(r.text for r in p.runs).strip()]
+    assert len(paragraphs) == 2, f"number and label must be separate: {len(paragraphs)}"
+
+    sizes = [max(r.font.size.pt for r in p.runs if r.font.size) for p in paragraphs]
+    assert sizes[0] > sizes[1], f"the figure is not the bigger of the two: {sizes}"
+    assert min(sizes) >= 9, f"shrunk into microtext: {sizes}"

@@ -1000,3 +1000,43 @@ def test_gigachat_backend_is_queued_when_the_oauth_host_is_unreachable(monkeypat
     monkeypatch.setattr(backends, "_gigachat", lambda: "client")
     client, name = backends.resolve("GigaChat-2-Max")
     assert (client, name) == ("client", "GigaChat-2-Max")
+
+
+def test_widow_check_measures_each_paragraph_at_its_own_size(tmp_path):
+    """A box can legitimately hold two sizes — a display figure over its caption
+    — and the check took the shape's MAXIMUM. Measured: an 18pt caption that
+    renders on one line was reported as a two-line widow because the figure
+    above it is 24pt. The paragraph's own size is the only honest input."""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+
+    from evaluation.deterministic import evaluate
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Inches(10), Inches(5.63)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    # A separate title, or the display box itself is picked as the slide title
+    # and the orphan check skips it — the first fixture passed on HEAD for that
+    # reason alone, proving nothing.
+    heading = slide.shapes.add_textbox(Inches(0.5), Inches(0.4), Inches(6), Inches(0.8))
+    heading.text_frame.text = "Результаты"
+    heading.text_frame.paragraphs[0].runs[0].font.size = Pt(30)
+    heading.text_frame.paragraphs[0].runs[0].font.name = "Arial"
+
+    box = slide.shapes.add_textbox(Inches(0.5), Inches(2), Inches(6), Inches(2))
+    box.text_frame.word_wrap = True
+    box.text_frame.text = "-40%"
+    # Sizes and width chosen BY MEASUREMENT, not by eye: at 24pt this caption
+    # is two lines with a widow in a 6in box, at 18pt it is one line. A first
+    # fixture at 40/14pt proved nothing — it passed on HEAD too.
+    box.text_frame.paragraphs[0].runs[0].font.size = Pt(24)
+    box.text_frame.paragraphs[0].runs[0].font.name = "Arial"
+    caption = box.text_frame.add_paragraph()
+    caption.text = "времени на подготовку регулярной отчётности"
+    caption.runs[0].font.size = Pt(18)
+    caption.runs[0].font.name = "Arial"
+
+    path = str(tmp_path / "mixed.pptx")
+    prs.save(path)
+    detail = evaluate(path)["dop_orphans"]["detail"]
+    assert detail.startswith("0 "), f"a one-line caption was called a widow: {detail}"

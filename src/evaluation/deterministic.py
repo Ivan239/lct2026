@@ -315,14 +315,23 @@ def evaluate(pptx_path, slide_roles=None):
         for s in content:
             if not s.width or s.shape_id == title_id:
                 continue
-            size_pt = _shape_max_size(s)
             fn = next((r.font.name for r in _shape_runs(s) if r.font.name), None)
             m = metrics_for(fn) if fn else None
-            if not size_pt or m is None:
+            if m is None:
                 continue
             for p in s.text_frame.paragraphs:
                 txt = "".join(r.text for r in p.runs).strip()
                 if not txt:
+                    continue
+                # The PARAGRAPH's own size, not the shape's maximum. A box can
+                # legitimately hold two sizes — a display figure over its
+                # caption — and measuring the caption's wrapping at the figure's
+                # size invents lines that do not exist: a 18pt caption that
+                # renders on one line was reported as a two-line widow because
+                # the number above it is 24pt.
+                sizes = [r.font.size.pt for r in p.runs if r.font.size and r.text.strip()]
+                size_pt = max(sizes) if sizes else _shape_max_size(s)
+                if not size_pt:
                     continue
                 widow, nlines = _is_widow(txt, Emu(s.width).inches, size_pt, m,
                                           horizontal_margins_in(s))
