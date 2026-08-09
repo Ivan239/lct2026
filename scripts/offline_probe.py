@@ -34,6 +34,7 @@ import argparse
 import glob
 import json
 import os
+import shutil
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -131,6 +132,16 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE):
     src = os.path.join(TEMPLATES, f"{template_id}.pptx")
     archetypes, pngs = _cached_parse(template_id)
     if archetypes is None:
+        # A skipped template must leave NOTHING behind. survey-69 has been
+        # skipped since iter53 (its cached parses are poisoned) while its deck
+        # and eval.json from an older run sat in the output directory — and were
+        # read as current during a later measurement. Same trap as iter69, where
+        # a crashed run left the previous deck in place and it looked like the
+        # fix had done nothing: an artifact that may not have been rewritten is
+        # not evidence.
+        stale = os.path.join(out_root, name)
+        if os.path.isdir(stale):
+            shutil.rmtree(stale)
         return {"template": name, "skipped": "нет разобранного шаблона в output/loop"}
 
     profile = build_measured_profile(pngs, archetypes) if pngs else None
@@ -154,7 +165,15 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE):
             block, item["role"], bullet_char_budget(item_chars.get(slide_idx)))
         plan.append((block, slide_idx))
 
+    # Cleared BEFORE generating for the same reason it is cleared on a skip: a
+    # run that dies half-way leaves the previous deck and renders in place, and
+    # they read as the result of the run that just failed. That happened for
+    # real in iter69 — a SyntaxError killed the probe, the old renders were
+    # inspected, and the conclusion "the change did nothing" was right only by
+    # accident.
     out_dir = os.path.join(out_root, name)
+    if os.path.isdir(out_dir):
+        shutil.rmtree(out_dir)
     os.makedirs(out_dir, exist_ok=True)
     deck = os.path.join(out_dir, "deck.pptx")
     generate(src, plan, deck, synth_canvas=_synth_canvas_hints(src, plan, profile),
