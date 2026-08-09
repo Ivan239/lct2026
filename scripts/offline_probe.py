@@ -435,6 +435,119 @@ def canvas_slots_used(deck_path, source_path, plan):
     return worst if worst and worst[0] < worst[1] else None
 
 
+def _ink_rows(img, box, size):
+    """Rows of the crop that contain ink, as (top, bottom) spans in pixels.
+
+    Ink is "darker or lighter than this crop's own background by a margin", so
+    it works on a white slide and on a dark canvas alike. Rows closer together
+    than a third of the tallest span belong to the same line — Cyrillic
+    descenders and diacritics («ё», «у») otherwise split one line in two.
+    """
+    from PIL import Image  # noqa: F401  (imported here: the probe runs headless too)
+
+    w, h = img.size
+    x0 = max(0, int(w * box[0] / size[0]))
+    x1 = min(w, int(w * (box[0] + box[2]) / size[0]))
+    y0 = max(0, int(h * box[1] / size[1]))
+    y1 = min(h, int(h * (box[1] + box[3]) / size[1]))
+    if x1 - x0 < 4 or y1 - y0 < 4:
+        return []
+    crop = img.crop((x0, y0, x1, y1)).convert("L")
+    pixels = crop.tobytes()  # one byte per pixel in "L"; getdata() is deprecated
+    cw, ch = crop.size
+    background = max(set(pixels), key=pixels.count)
+    rows = []
+    for row in range(ch):
+        line = pixels[row * cw:(row + 1) * cw]
+        inked = sum(1 for value in line if abs(value - background) > 40)
+        rows.append(inked > cw * 0.005)
+
+    spans = []
+    start = None
+    for row, has_ink in enumerate(rows + [False]):
+        if has_ink and start is None:
+            start = row
+        elif not has_ink and start is not None:
+            spans.append((start, row))
+            start = None
+    if not spans:
+        return []
+    merge_gap = max(2, (max(b - a for a, b in spans)) // 3)
+    merged = [spans[0]]
+    for a, b in spans[1:]:
+        if a - merged[-1][1] <= merge_gap:
+            merged[-1] = (merged[-1][0], b)
+        else:
+            merged.append((a, b))
+    return merged
+
+
+def title_ink_cut_by_its_box(deck_path, renders, plan=None):
+    """Slides where the title's ink runs into the bottom edge of its own box.
+
+    The harness has been blind exactly where the generator is blind: both count
+    lines with the same fontTools model, so when the model was wrong — bold
+    titles measured with the regular face, 7-8% narrow on Cyrillic (iter96) —
+    every check agreed with the mistake, the deck scored 99.5, and a bullet was
+    printed through the title's second line.
+
+    Pixels do not share that model, but they do not come labelled either, and
+    two earlier shapes of this measure failed on that:
+
+    * counting ink rows INSIDE the box found nothing — the unpredicted line is
+      outside the box by definition;
+    * looking BELOW the box fired on every healthy deck, because the next box's
+      text is there and pixels cannot say whose line it is.
+
+    What pixels can say without attribution is whether the ink reaches the box's
+    own bottom edge. A box sized for the text it holds leaves the last line
+    clear of the edge; a box sized for one line while the renderer draws two has
+    the second line starting inside it and running off. That is exactly the
+    condition that makes everything positioned after the title wrong.
+
+    SYNTHESIZED slides only. On a native slide the title box is the designer's,
+    and a designer's text exceeds its frame by intent — the first run of this
+    flagged two untouched T-Zh study slides for exactly that, the same false
+    alarm CLAUDE.md records three times over.
+
+    Returns [(slide, clearance_in)] — reported, not scored.
+    """
+    if not renders:
+        return []
+    from PIL import Image
+
+    synthesized = {pos for pos, (_, idx) in enumerate(plan or [])
+                   if not isinstance(idx, int)}
+    prs = Presentation(deck_path)
+    size = (prs.slide_width, prs.slide_height)
+    out = []
+    for index, slide in enumerate(prs.slides):
+        if index >= len(renders):
+            break
+        if index not in synthesized:
+            continue
+        boxes = [s for s in slide.shapes
+                 if s.has_text_frame and s.text_frame.text.strip()
+                 and s.top is not None and s.width and s.height
+                 and not is_chrome_shape(s, prs.slide_height)]
+        if len(boxes) < 2:
+            continue  # nothing is positioned after this title
+        title = min(boxes, key=lambda s: int(s.top))
+        with Image.open(renders[index]) as raw:
+            img = raw.convert("RGB")
+            spans = _ink_rows(img, (int(title.left), int(title.top),
+                                    int(title.width), int(title.height)), size)
+            crop_px = max(1.0, img.size[1] * int(title.height) / size[1])
+        if not spans:
+            continue
+        clearance = Emu(int(title.height)).inches * (1 - spans[-1][1] / crop_px)
+        # Antialiasing and descenders reach a few thousandths past the glyphs;
+        # a box that is genuinely cutting a line leaves nothing at all.
+        if clearance < 0.02:
+            out.append((index + 1, round(clearance, 3)))
+    return out
+
+
 def _median_title_gap_pct(path):
     """Median gap between a slide's title and the content under it, as a share
     of the slide height. None when no slide offers two content boxes."""
@@ -549,6 +662,7 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
         "over_at_wrap": boxes_over_at_render_wrap(deck, src, plan),
         "slots": canvas_slots_used(deck, src, plan),
         "title_gap": title_gap_vs_template(deck, src),
+        "title_ink": title_ink_cut_by_its_box(deck, renders, plan),
         "weak": weak,
         "unmeasured": [i + 1 for i, n in
                        enumerate(result["contrast"].get("unmeasured_boxes") or []) if n],
@@ -605,6 +719,9 @@ def main():
                  if r.get("slots") else "")
               + (f"  зазор под титулом {r['title_gap'][0]}% против {r['title_gap'][1]}% у шаблона"
                  if r.get("title_gap") else "")
+              + (("  БОКС ТИТУЛА РЕЖЕТ ТЕКСТ НА РЕНДЕРЕ: "
+                  + "; ".join(f"слайд {n} (запас {gap}in)" for n, gap in r["title_ink"]))
+                 if r.get("title_ink") else "")
               + (f"  НЕ ПРОВЕРЕН контраст: {r['unmeasured']}"
                  + (f" ({'; '.join(r['unmeasured_why'])})" if r.get("unmeasured_why") else "")
                  if r["unmeasured"] else ""))
