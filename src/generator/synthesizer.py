@@ -556,13 +556,20 @@ def _add_title(slide, bounds, text, font_name, color_hex, size_pt=None, resolver
     # slide — 62% — and the two comparison columns it introduces were squeezed
     # into a strip at the bottom, while the template's own titles run 8-23% of
     # the slide (median across the corpus).
+    # Measured against a budget shortened by SINGLE_LINE_SAFETY, for the reason
+    # iter64 established on the cover: the renderer wraps 2-4% earlier than
+    # fontTools advances predict, so a title that "fits two lines" is drawn on
+    # three. On the universal image slide that put «подразделения» straight
+    # through the top border of the picture frame placed below it — the
+    # estimate said 1.02in where the truth was 1.53in.
+    fit_width_in = Emu(width).inches * SINGLE_LINE_SAFETY
     band_in = Emu(max(1, bounds["bottom"] - bounds["top"])).inches
     while size_pt > _MIN_CONTENT_TITLE_PT:
-        if (estimate_block_height_in(text, Emu(width).inches, size_pt, metrics=metrics)
+        if (estimate_block_height_in(text, fit_width_in, size_pt, metrics=metrics)
                 <= band_in * _TITLE_MAX_BAND_SHARE):
             break
         size_pt -= 2
-    height_in = estimate_block_height_in(text, Emu(width).inches, size_pt, metrics=metrics) + 0.25
+    height_in = estimate_block_height_in(text, fit_width_in, size_pt, metrics=metrics) + 0.25
     box = slide.shapes.add_textbox(bounds["left"], bounds["top"], width, Emu(int(Inches(height_in))))
     tf = box.text_frame
     tf.word_wrap = True
