@@ -76,3 +76,26 @@ def test_a_repeated_role_reuses_a_template_slide():
     plan = probe.build_plan(spec_, probe.repeat_outline(probe.OUTLINE, 3), probe.LONG)
     indices = [idx for _, idx in plan]
     assert len(indices) > len(set(indices)), f"no slide is reused: {indices}"
+
+
+def test_repeated_blocks_carry_different_items():
+    """A repeat that only changes the heading is not a repeat: the per-slot
+    character budget trims a suffix away, and the slides end up with identical
+    bullets under different titles — a fixture that stops tripping the duplicate
+    check without actually varying. The items are replaced outright.
+    """
+    first = probe.vary_block(probe.LONG["bullet_list"], 0)
+    second = probe.vary_block(probe.LONG["bullet_list"], 1)
+
+    assert first["bullets"] != second["bullets"]
+    assert first["title"] != second["title"]
+    # …and the difference must survive a trim to a short slot budget.
+    from content_parser.two_phase import _enforce_text_budgets
+
+    trimmed = [_enforce_text_budgets(dict(b), "bullet_list", 28)["bullets"]
+               for b in (first, second)]
+    assert trimmed[0] != trimmed[1], trimmed
+
+
+def test_variation_leaves_the_first_block_alone():
+    assert probe.vary_block(probe.LONG["stats_kpi"], 0) == dict(probe.LONG["stats_kpi"])

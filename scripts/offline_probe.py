@@ -219,8 +219,10 @@ def build_plan(spec, outline, blocks):
     item_chars = {s["idx"]: s.get("item_chars")
                   for fam in spec["families"] for s in fam["slides"]}
     plan = []
+    seen_role = {}
     for item, slide_idx, count in plan_from_outline(outline, spec)[0]:
-        block = dict(blocks[item["role"]])
+        seen_role[item["role"]] = seen_role.get(item["role"], -1) + 1
+        block = vary_block(blocks[item["role"]], seen_role[item["role"]])
         if count:  # honour the capacity the matcher computed
             for field in ("bullets", "stats", "left_points", "right_points"):
                 if field in block:
@@ -229,6 +231,47 @@ def build_plan(spec, outline, blocks):
             block, item["role"], bullet_char_budget(item_chars.get(slide_idx)))
         plan.append((block, slide_idx))
     return plan
+
+
+# A repeated role must carry DIFFERENT content, or the deck is duplicate by
+# construction and every duplicate-related criterion fires on the fixture rather
+# than on the product: --repeat 3 reported «3 повторяющихся заголовка» and
+# «смысловые дубли» on all four templates, which said nothing except that the
+# probe fed the same block three times.
+_REPEAT_THEMES = ["что мешало", "что сделали", "что дальше", "что проверили", "что осталось"]
+_ITEM_POOL = [
+    "Ручной сбор показателей из семи независимых систем",
+    "Разные форматы выгрузок у каждого подразделения",
+    "Согласование занимало до двух недель",
+    "Автоматический сбор по расписанию каждую ночь",
+    "Единая витрина данных для всех подразделений",
+    "Проверка расхождений до публикации отчёта",
+    "Обучение команды за две недели без отрыва",
+    "Права доступа настраиваются по ролям",
+    "История версий отчёта хранится целиком",
+]
+
+
+def vary_block(block, n):
+    """The same block, told about a different part of the story."""
+    if n == 0:
+        return dict(block)
+    varied = dict(block)
+    theme = _REPEAT_THEMES[n % len(_REPEAT_THEMES)]
+    if varied.get("title"):
+        varied["title"] = f"{varied['title']} — {theme}"
+    # The items are REPLACED, not suffixed. A suffix is the first thing the
+    # per-slot character budget trims away, and then the slides carry identical
+    # bullets under different headings — a fixture that merely stops tripping
+    # the duplicate check instead of actually varying.
+    for field in ("bullets", "left_points", "right_points"):
+        if field in varied:
+            varied[field] = [_ITEM_POOL[(n * 7 + i) % len(_ITEM_POOL)]
+                             for i in range(len(varied[field]))]
+    if "stats" in varied:
+        varied["stats"] = [[num, _ITEM_POOL[(n * 5 + i) % len(_ITEM_POOL)]]
+                           for i, (num, _) in enumerate(varied["stats"])]
+    return varied
 
 
 def repeat_outline(outline, times):
