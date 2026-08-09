@@ -305,6 +305,8 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
         "weak": weak,
         "unmeasured": [i + 1 for i, n in
                        enumerate(result["contrast"].get("unmeasured_boxes") or []) if n],
+        "unmeasured_why": sorted({w for ws in (result["contrast"].get("unmeasured_why") or [])
+                                  for w in ws}),
     }
 
 
@@ -350,7 +352,9 @@ def main():
             weak_parse = f"  разбор {r['parse']:>6}" + ("  ← почти всё «other»" if got * 2 < total else "")
         print(f"- {r['template']:10} итог {r['total_100']:6}  из шаблона {r['native']:>4}{weak_parse}"
               + (f"  слабые: {r['weak']}" if r["weak"] else "  слабых нет")
-              + (f"  НЕ ПРОВЕРЕН контраст: {r['unmeasured']}" if r["unmeasured"] else ""))
+              + (f"  НЕ ПРОВЕРЕН контраст: {r['unmeasured']}"
+                 + (f" ({'; '.join(r['unmeasured_why'])})" if r.get("unmeasured_why") else "")
+                 if r["unmeasured"] else ""))
     print("\nПОСМОТРИ ГЛАЗАМИ — числа выше не заменяют взгляд на слайд:")
     for r in rows:
         for path in r.get("renders", []):

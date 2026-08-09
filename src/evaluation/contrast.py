@@ -238,10 +238,26 @@ def _box_pixels(img, rect, size):
     return list(img.crop((x0, y0, x1, y1)).getdata())
 
 
-def _box_contrast(pixels):
-    """(ratio, ink, bg) for one text box, or None when it can't be measured."""
-    if len(pixels) < MIN_BOX_PIXELS:
+UNMEASURED_TOO_SMALL = "бокс меньше порога измерения"
+UNMEASURED_ON_ARTWORK = "текст лежит на картинке — фона под ним нет"
+UNMEASURED_NO_GLYPHS = "глифы не выделяются из фона"
+
+
+def _box_contrast(pixels, reasons=None):
+    """(ratio, ink, bg) for one text box, or None when it can't be measured.
+
+    `reasons` collects WHY, when the caller passes a list. A bare count of
+    unmeasured boxes says the harness was blind; it does not say that the text
+    is lying on artwork, which is the answer to "why did nobody catch that
+    unreadable heading" — and that question came up on the universal stats
+    slide, whose heading crosses the sculpture while the deck scores 91.9."""
+    def _no(reason):
+        if reasons is not None:
+            reasons.append(reason)
         return None
+
+    if len(pixels) < MIN_BOX_PIXELS:
+        return _no(UNMEASURED_TOO_SMALL)
     quant = [_quantize(p) for p in pixels]
     counts = Counter(quant)
     bg, bg_n = counts.most_common(1)[0]
@@ -254,17 +270,17 @@ def _box_contrast(pixels):
         # its pink sky, nothing to do with our text. Measured separation is wide:
         # 98 real text boxes across four decks sit at 0.70-0.99 modal share
         # (median 0.92), while those two photo-backed boxes are 0.02 and 0.34.
-        return None
+        return _no(UNMEASURED_ON_ARTWORK)
     ink = [p for p in quant if _dist(p, bg) > INK_DISTANCE]
     if not ink or len(ink) / len(quant) > MAX_INK_SHARE:
         # No glyphs found, or the box is mostly "ink" — which means the modal
         # colour is the text and the background is what we'd be measuring
         # against. Either way this box cannot answer the question; stay silent
         # rather than report a number that means something else.
-        return None
+        return _no(UNMEASURED_NO_GLYPHS)
     colour, n = Counter(ink).most_common(1)[0]
     if n / len(ink) < MIN_INK_FRACTION:
-        return None
+        return _no(UNMEASURED_NO_GLYPHS)
     return contrast_ratio(colour, bg), colour, bg
 
 
@@ -278,22 +294,25 @@ def evaluate_boxed_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATIO):
 
     prs = Presentation(pptx_path)
     size = (prs.slide_width, prs.slide_height)
-    per, low, blind = [], [], []
+    per, low, blind, blind_why = [], [], [], []
     for i, slide in enumerate(prs.slides):
         if i >= len(png_paths):
             per.append(None)
             blind.append(0)
+            blind_why.append([])
             continue
         with Image.open(png_paths[i]) as raw:
             img = raw.convert("RGB")
             worst, flagged, unmeasured = None, False, 0
+            why = []
             for shape in slide.shapes:
                 if not shape.has_text_frame or not shape.text_frame.text.strip():
                     continue
                 if None in (shape.left, shape.top) or not (shape.width and shape.height):
                     continue
                 measured = _box_contrast(
-                    _box_pixels(img, (shape.left, shape.top, shape.width, shape.height), size))
+                    _box_pixels(img, (shape.left, shape.top, shape.width, shape.height), size),
+                    reasons=why)
                 if measured is None:
                     # Counted, not just skipped: a box we cannot measure is text
                     # whose readability nobody checked, and silence about it
@@ -321,11 +340,13 @@ def evaluate_boxed_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATIO):
                     flagged = True
         per.append(worst)
         blind.append(unmeasured)
+        blind_why.append(sorted(set(why)))
         if flagged:
             low.append(i)
     return {
         "per_slide": per,
         "low_contrast_slides": low,
         "unmeasured_boxes": blind,
+        "unmeasured_why": blind_why,
         "coverage": (sum(1 for r in per if r is not None), len(per)),
     }
