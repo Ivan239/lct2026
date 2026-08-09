@@ -42,12 +42,17 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pptx import Presentation  # noqa: E402
+from pptx.util import Emu  # noqa: E402
 
 from common.synthesis import SYNTHESIZE  # noqa: E402
 from content_parser.two_phase import _enforce_text_budgets, bullet_char_budget  # noqa: E402
 from design_system.style_profile import build_measured_profile  # noqa: E402
 from evaluation.evaluate import evaluate_deck  # noqa: E402
 from evaluation.loop import _synth_canvas_hints  # noqa: E402
+from fonts.metrics import FontResolver  # noqa: E402
+from generator.text_fit import (SINGLE_LINE_SAFETY, estimate_block_height_in,  # noqa: E402
+                                horizontal_margins_in, vertical_insets_emu)
+from template_parser.parser import extract_theme  # noqa: E402
 from generator.generator import generate  # noqa: E402
 from matcher.matcher import plan_from_outline  # noqa: E402
 from rendering.render import render_pptx_to_pngs  # noqa: E402
@@ -291,6 +296,63 @@ def repeat_outline(outline, times):
     return out
 
 
+def boxes_over_at_render_wrap(deck_path, source_path=None, plan=None):
+    """How many boxes of OUR deck are predicted to overflow once the renderer's
+    earlier wrap is allowed for.
+
+    enforce_text_fits measures against the full box width; the renderer wraps
+    2-4% sooner (CLAUDE.md), so a title measured at two lines is drawn on three
+    and spills out of its box. Measured on the T-Zh mono repeat deck: the
+    heading needs 2.45in in a 1.88in box, and LibreOffice either autofits it
+    smaller — silently undoing the size we computed — or lets it run over.
+
+    Counts OUR text only. A template's own text exceeds its frame 27-43 times per
+    deck by intent (iter61), so a raw count over the whole deck says nothing
+    about us — the first version printed 23 for a six-slide deck and most of it
+    belonged to the designer. Text that also appears on the source slide is
+    skipped.
+
+    Reported, not fixed: adding the margin inside enforce_text_fits would shrink
+    the designer's boxes too. This number says how often it happens to us, so a
+    change can be judged rather than guessed at.
+    """
+    template_texts = set()
+    if source_path and plan:
+        source = Presentation(source_path)
+        slides = list(source.slides)
+        for _, idx in plan:
+            if isinstance(idx, int) and 0 <= idx < len(slides):
+                template_texts.update(
+                    " ".join(sh.text_frame.text.split())
+                    for sh in slides[idx].shapes if sh.has_text_frame)
+
+    prs = Presentation(deck_path)
+    metrics_for = FontResolver(deck_path, extract_theme(deck_path)).metrics_for
+    over = 0
+    for slide in prs.slides:
+        for shape in slide.shapes:
+            if not shape.has_text_frame or not shape.width or not shape.height:
+                continue
+            texts = [t for t in (p.text for p in shape.text_frame.paragraphs) if t.strip()]
+            sizes = [r.font.size.pt for p in shape.text_frame.paragraphs
+                     for r in p.runs if r.font.size and r.text.strip()]
+            font = next((r.font.name for p in shape.text_frame.paragraphs
+                         for r in p.runs if r.font.name), None)
+            metrics = metrics_for(font) if font else None
+            if not texts or not sizes or metrics is None:
+                continue
+            if " ".join(shape.text_frame.text.split()) in template_texts:
+                continue  # the designer's own text, in the designer's own box
+            top_inset, bottom_inset = vertical_insets_emu(shape)
+            usable = Emu(max(0, shape.height - top_inset - bottom_inset)).inches
+            drawn = estimate_block_height_in(
+                texts, Emu(shape.width).inches * SINGLE_LINE_SAFETY, max(sizes),
+                metrics=metrics, margins_in=horizontal_margins_in(shape))
+            if drawn > usable:
+                over += 1
+    return over
+
+
 def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
     src = os.path.join(TEMPLATES, f"{template_id}.pptx")
     archetypes, pngs = _cached_parse(template_id)
@@ -353,6 +415,7 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
         "total_100": result["total_100"],
         "native": f"{native}/{len(plan)}",
         "parse": f"{classified}/{len(archetypes)}",
+        "over_at_wrap": boxes_over_at_render_wrap(deck, src, plan),
         "weak": weak,
         "unmeasured": [i + 1 for i, n in
                        enumerate(result["contrast"].get("unmeasured_boxes") or []) if n],
@@ -403,6 +466,8 @@ def main():
             weak_parse = f"  разбор {r['parse']:>6}" + ("  ← почти всё «other»" if got * 2 < total else "")
         print(f"- {r['template']:10} итог {r['total_100']:6}  из шаблона {r['native']:>4}{weak_parse}"
               + (f"  слабые: {r['weak']}" if r["weak"] else "  слабых нет")
+              + (f"  переполнится при рендерном переносе: {r['over_at_wrap']}"
+                 if r.get("over_at_wrap") else "")
               + (f"  НЕ ПРОВЕРЕН контраст: {r['unmeasured']}"
                  + (f" ({'; '.join(r['unmeasured_why'])})" if r.get("unmeasured_why") else "")
                  if r["unmeasured"] else ""))

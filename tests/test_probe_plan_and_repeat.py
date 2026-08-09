@@ -99,3 +99,31 @@ def test_repeated_blocks_carry_different_items():
 
 def test_variation_leaves_the_first_block_alone():
     assert probe.vary_block(probe.LONG["stats_kpi"], 0) == dict(probe.LONG["stats_kpi"])
+
+
+def test_the_wrap_overflow_count_ignores_the_designers_own_boxes(tmp_path):
+    """A template's own text exceeds its frame 27-43 times per deck by intent
+    (iter61). Counting those would report the designer's habits as our defect —
+    the first version of this number printed 23 for a six-slide deck, most of it
+    not ours."""
+    from pptx import Presentation
+    from pptx.util import Emu, Inches, Pt
+
+    source = str(tmp_path / "src.pptx")
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(int(Inches(10))), Emu(int(Inches(5.62)))
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    box = slide.shapes.add_textbox(Emu(int(Inches(0.3))), Emu(int(Inches(0.3))),
+                                   Emu(int(Inches(3.0))), Emu(int(Inches(0.4))))
+    box.text_frame.word_wrap = True
+    box.text_frame.text = ("Собственный длинный текст дизайнера, который заведомо "
+                           "не помещается в свою рамку и это его право")
+    box.text_frame.paragraphs[0].runs[0].font.size = Pt(28)
+    box.text_frame.paragraphs[0].runs[0].font.name = "Arial"
+    prs.save(source)
+
+    counted_all = probe.boxes_over_at_render_wrap(source)
+    assert counted_all >= 1, "fixture: the box is supposed to overflow"
+
+    counted_ours = probe.boxes_over_at_render_wrap(source, source, [({}, 0)])
+    assert counted_ours == 0, "the designer's own text must not be counted as ours"
