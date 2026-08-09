@@ -32,6 +32,7 @@ import sys
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from common.synthesis import SYNTHESIZE  # noqa: E402
+from content_parser.two_phase import _enforce_text_budgets, bullet_char_budget  # noqa: E402
 from design_system.style_profile import build_measured_profile  # noqa: E402
 from evaluation.evaluate import evaluate_deck  # noqa: E402
 from evaluation.loop import _synth_canvas_hints  # noqa: E402
@@ -129,13 +130,21 @@ def probe(name, template_id, blocks, out_root):
     spec = build_spec(src, archetypes, style_profile=profile)
     assignments, _ = plan_from_outline(OUTLINE, spec)
 
+    item_chars = {s["idx"]: s.get("item_chars")
+                  for fam in spec["families"] for s in fam["slides"]}
     plan = []
     for item, slide_idx, count in assignments:
         block = dict(blocks[item["role"]])
         if count:  # honour the capacity the matcher computed — see module docstring
             for field in ("bullets", "stats", "left_points", "right_points"):
                 if field in block:
-                    block[field] = block[field][:count]
+                    block[field] = list(block[field])[:count]
+        # …and the character budget, which the real pipeline applies to every
+        # block (two_phase.generate_block). Skipping it made the probe ship a
+        # 49-character bullet into a slot whose budget is 28 and then report the
+        # 9pt microtext that followed as if it were a product defect.
+        block = _enforce_text_budgets(
+            block, item["role"], bullet_char_budget(item_chars.get(slide_idx)))
         plan.append((block, slide_idx))
 
     out_dir = os.path.join(out_root, name)

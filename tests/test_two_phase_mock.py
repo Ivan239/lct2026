@@ -134,3 +134,79 @@ def test_over_budget_item_is_never_cut_mid_word():
     assert _trim_to_budget("Клиентоориентированность", 18) == "Клиентоориентированность"
     assert _trim_to_budget("Забота о клиенте и партнёре", 18) == "Забота о клиенте"
     assert _trim_to_budget("Коротко", 18) == "Коротко"
+
+
+def test_a_trimmed_bullet_does_not_end_on_a_preposition():
+    """Cutting at a word boundary is not enough. The T-Zh study slot budget is
+    28 characters, and realistic bullets came out as «Ручной сбор показателей
+    из», «Разные форматы выгрузок у», «Согласование занимало до» — each reads as
+    a sentence chopped mid-thought, and each shipped that way."""
+    from content_parser.two_phase import _trim_to_budget
+
+    assert _trim_to_budget("Ручной сбор показателей из семи независимых систем", 28) \
+        == "Ручной сбор показателей"
+    assert _trim_to_budget("Разные форматы выгрузок у каждого подразделения", 28) \
+        == "Разные форматы выгрузок"
+    assert _trim_to_budget("Единая витрина данных и отчётности для всех", 28) \
+        == "Единая витрина данных"
+
+    # A phrase that already ends on a content word is untouched, and a single
+    # long word is still never cut mid-letter (iter28).
+    assert _trim_to_budget("Ручной сбор показателей", 28) == "Ручной сбор показателей"
+    assert _trim_to_budget("Клиентоориентированность", 18) == "Клиентоориентированность"
+
+
+def test_the_slot_char_budget_reaches_the_model(monkeypatch, tmp_path):
+    """The budget crosses three modules — build_spec puts item_chars in the
+    spec, generate_deck looks it up for the slide the matcher chose, and
+    generate_block substitutes it into the prompt. iter28 tested only the last
+    hop, so a break in either of the first two would have been invisible: the
+    model would keep being asked for 72 characters into a 28-character slot."""
+    import glob
+    import json
+    import os
+    import re
+
+    from conftest import TJ_TEMPLATE
+    from design_system.style_profile import build_measured_profile
+    from evaluation.loop import generate_deck
+    from template_spec.builder import build_spec
+
+    cache = "output/loop/GigaChat-2/custom_f496182bb15f42bb/archetypes.json"
+    if not os.path.exists(TJ_TEMPLATE) or not os.path.exists(cache):
+        return
+    archetypes = {int(k): v for k, v in json.load(open(cache)).items()}
+    pngs = sorted(glob.glob("output/loop/GigaChat-2/custom_f496182bb15f42bb/rendered/*.png"))
+    spec = build_spec(TJ_TEMPLATE, archetypes,
+                      style_profile=build_measured_profile(pngs, archetypes) if pngs else None)
+
+    seen = []
+
+    class Client:
+        def chat(self, messages, model=None, **kwargs):
+            prompt = " ".join(m.get("content", "") for m in messages)
+            seen.append(prompt)
+            count = int(re.search(r"РОВНО (\d+)", prompt).group(1)) if "РОВНО" in prompt else 3
+            if "Разбей бриф" in prompt:
+                body = json.dumps([{"role": "title", "theme": "t", "count": None},
+                                   {"role": "bullet_list", "theme": "b", "count": 3},
+                                   {"role": "closing", "theme": "z", "count": None}])
+            elif "слайда-списка" in prompt:
+                body = json.dumps({"title": "Что мешало",
+                                   "bullets": [f"пункт {i}" for i in range(count)]})
+            elif "иллюстрацией" in prompt:
+                body = json.dumps({"title": "В работе", "image": "экран дашборда"})
+            elif "титульного" in prompt:
+                body = json.dumps({"title": "Поток", "subtitle": "итоги"})
+            else:
+                body = json.dumps({"title": "Итог", "subtitle": "давайте"})
+            return {"choices": [{"message": {"content": body}}]}
+
+    generate_deck(Client(), "GigaChat-2", TJ_TEMPLATE, spec, "бриф", "",
+                  str(tmp_path / "deck.pptx"))
+
+    list_prompts = [p for p in seen if "слайда-списка" in p]
+    assert list_prompts, "no bullet-list block was requested"
+    assert "до 28 символов" in list_prompts[0], (
+        "the slot's own budget did not reach the prompt: "
+        + next((l for l in list_prompts[0].splitlines() if "символов" in l), "?"))
