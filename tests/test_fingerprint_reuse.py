@@ -50,3 +50,27 @@ def test_low_confidence_answers_never_poison_the_cache(tmp_path):
 
     build_archetype_map(HesitantClient(), extract_template(PRESET_A), fingerprint_cache=cache)
     assert cache._data == {}  # hesitant guesses must not be memorized
+
+
+def test_an_all_other_parse_is_a_failure_not_a_cache_entry():
+    """build_archetype_map degrades a slide to "other" on ANY exception, so a
+    run that loses the network mid-way produces a full map of shrugs. Writing
+    that to archetypes.json freezes the non-answer for that (model, template)
+    pair forever, because later runs reuse the cache.
+
+    Measured on this machine when the offline probe stumbled into it: 9 of 20
+    cached parses were entirely "other", including three of the five real
+    templates under one model — those pairs could only ever produce decks with
+    zero native slides, and nothing said so.
+
+    The project already applies this reasoning one level down: extractor's
+    fingerprint cache refuses to store "other" because a shrug is not knowledge.
+    This is the same rule for the per-template cache."""
+    from evaluation.loop import _is_failed_parse
+
+    assert _is_failed_parse({0: "other", 1: "other", 2: "other"})
+    # survey-31's real parse is almost all "other" — and must NOT be discarded,
+    # because the one real answer in it is knowledge.
+    assert not _is_failed_parse({i: "other" for i in range(30)} | {30: "closing"})
+    assert not _is_failed_parse({0: "title", 1: "bullet_list"})
+    assert not _is_failed_parse({}), "an empty map is not the same claim"

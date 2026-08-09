@@ -64,6 +64,27 @@ def _workdir(model, source_name, out_root=LOOP_ROOT):
     return d
 
 
+def _is_failed_parse(archetype_map):
+    """A map that is nothing but "other" is a FAILED classification, not a parse.
+
+    build_archetype_map degrades a slide to "other" on any exception, so a run
+    that loses the network mid-way produces a full map of shrugs — and writing
+    it to archetypes.json freezes that non-answer for the (model, template) pair
+    forever, because later runs reuse the cache. Measured on this machine: 9 of
+    20 cached parses were entirely "other", including three of the five real
+    templates under GigaChat-2, so those pairs could only ever produce decks
+    with zero native slides.
+
+    The project already applies exactly this reasoning one level down —
+    extractor's fingerprint cache refuses to store "other" because "a shrug is
+    not knowledge". This is the same rule for the per-template cache.
+
+    A template whose every slide genuinely is "other" costs one re-parse and
+    then answers the same; a poisoned cache costs every future run."""
+    values = set(archetype_map.values())
+    return bool(values) and values <= {"other"}
+
+
 def ensure_template(client, model, source_pptx, source_name, out_root=LOOP_ROOT, force=False):
     """Parse `source_pptx` under `model` if not already cached for it. Returns a
     dict with the archetype map, spec, style preamble, and meta (incl. which LLM
@@ -75,9 +96,16 @@ def ensure_template(client, model, source_pptx, source_name, out_root=LOOP_ROOT,
     render_dir = os.path.join(workdir, "rendered")
     png_paths = render_pptx_to_pngs(source_pptx, render_dir)
 
+    cached = None
     if os.path.exists(arch_path) and not force:
         with open(arch_path, encoding="utf-8") as f:
-            archetype_map = {int(k): v for k, v in json.load(f).items()}
+            cached = {int(k): v for k, v in json.load(f).items()}
+        if _is_failed_parse(cached):
+            print(f"[loop] кэш разбора {source_name} под {model} — сплошной 'other', "
+                  "переразбираю", flush=True)
+            cached = None
+    if cached is not None:
+        archetype_map = cached
         meta = json.load(open(meta_path, encoding="utf-8")) if os.path.exists(meta_path) else {}
     else:
         struct = extract_template(source_pptx)
@@ -91,6 +119,12 @@ def ensure_template(client, model, source_pptx, source_name, out_root=LOOP_ROOT,
         for idx in list(archetype_map):
             if has_oversized_picture(prs.slides[idx], prs.slide_width, prs.slide_height):
                 archetype_map[idx] = "other"
+        if _is_failed_parse(archetype_map):
+            # Do not persist a shrug: the next run would inherit it instead of
+            # trying again.
+            raise RuntimeError(
+                f"классификация {source_name} под {model} вернула только 'other' — "
+                "разбор не сохранён")
         with open(arch_path, "w", encoding="utf-8") as f:
             json.dump(archetype_map, f, ensure_ascii=False, indent=2)
 
