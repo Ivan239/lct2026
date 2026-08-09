@@ -315,7 +315,13 @@ def _trim_to_budget(item, max_chars):
     cut at, keep the item whole."""
     if len(item) <= max_chars:
         return item
-    head = item[:max_chars]
+    # max_chars + 1, so a word that ENDS exactly on the budget survives: the
+    # space after it has to be inside the slice for rsplit to see the boundary.
+    # Without it «Данные расходились» — 18 characters against a budget of 18 —
+    # came back as «Данные», because the slice ended mid-«расходились» and the
+    # partial word was then dropped. The extra character is never kept: rsplit
+    # cuts back to the last boundary either way.
+    head = item[:max_chars + 1]
     if " " not in head:
         return item
     trimmed = head.rsplit(" ", 1)[0].rstrip(".,;: ")

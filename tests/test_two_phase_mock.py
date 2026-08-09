@@ -136,6 +136,24 @@ def test_over_budget_item_is_never_cut_mid_word():
     assert _trim_to_budget("Коротко", 18) == "Коротко"
 
 
+def test_a_word_ending_exactly_on_the_budget_is_kept():
+    """The slice was taken at exactly max_chars, so the space FOLLOWING a word
+    that ends on the budget fell outside it: rsplit saw no boundary there, cut
+    back to the previous one, and «Данные расходились» — 18 characters against a
+    budget of 18 — shipped as «Данные». Seen on the render of the universal
+    template's numbered grid, whose cells learn an 18-char budget from the
+    designer's own «Название пункта»."""
+    from content_parser.two_phase import _trim_to_budget
+
+    assert len("Данные расходились") == 18
+    assert _trim_to_budget("Данные расходились между системами", 18) == "Данные расходились"
+    # One character less and the boundary genuinely does not fit.
+    assert _trim_to_budget("Данные расходились между системами", 17) == "Данные"
+    # The extra character is only ever used to SEE the boundary, never kept:
+    # a word straddling the budget is still dropped whole.
+    assert _trim_to_budget("Данные расходились всюду", 19) == "Данные расходились"
+
+
 def test_a_trimmed_bullet_does_not_end_on_a_preposition():
     """Cutting at a word boundary is not enough. The T-Zh study slot budget is
     28 characters, and realistic bullets came out as «Ручной сбор показателей
