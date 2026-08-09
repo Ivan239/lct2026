@@ -1109,6 +1109,29 @@ def _fill_display_stat(shape, pair, claimed_ids, resolver=None):
             run.font.bold = bold
 
 
+def _order_stat_pair(first, second):
+    """(figure_box, label_box) for one KPI pair — decided by SIZE, not by order.
+
+    Writing the number into the first box and the label into the second assumes
+    every board lists figure-then-caption. The T-Zh universal board does the
+    opposite: its caption sits at 11pt BELOW a 24pt figure, and reading order
+    hands the caption over first. The render showed the consequence twice on one
+    slide — «времени на подготовку регулярной отчётности» printed above «-40%»,
+    and a caption forced into the figure's 24pt box broke mid-word as
+    «подключённых клиентов е-/жемесячно».
+
+    A figure is set larger than its caption in every board in the corpus, so the
+    bigger box wins; on a tie the higher one does, which is where a figure sits
+    when both are the same size."""
+    first_pt = _max_font_pt(first) or 0
+    second_pt = _max_font_pt(second) or 0
+    if first_pt != second_pt:
+        return (first, second) if first_pt > second_pt else (second, first)
+    if (first.top or 0) != (second.top or 0):
+        return (first, second) if (first.top or 0) < (second.top or 0) else (second, first)
+    return first, second
+
+
 def _fill_stats_kpi(slide, data, claimed_ids, resolver=None):
     title_shape = _stats_title_shape(slide, claimed_ids)
     _set_run_text(title_shape, data.get("title", ""), claimed_ids, resolver=resolver)
@@ -1127,8 +1150,9 @@ def _fill_stats_kpi(slide, data, claimed_ids, resolver=None):
 
     if max_pairs >= 1:
         for i, (num, label) in enumerate(stats[:max_pairs]):
-            _set_run_text(boxes[i * 2], num, claimed_ids, resolver=resolver)
-            _set_run_text(boxes[i * 2 + 1], label, claimed_ids, resolver=resolver)
+            figure_box, label_box = _order_stat_pair(boxes[i * 2], boxes[i * 2 + 1])
+            _set_run_text(figure_box, num, claimed_ids, resolver=resolver)
+            _set_run_text(label_box, label, claimed_ids, resolver=resolver)
     elif boxes:
         # Real decks often hold this kind of content as one text block next to
         # small bullet/icon graphics, not as separate number+label boxes — with
