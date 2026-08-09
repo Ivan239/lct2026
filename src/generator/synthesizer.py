@@ -96,6 +96,9 @@ MIN_FRAME_HEIGHT = int(Inches(0.6))
 
 # Used only when the template's own title size cannot be measured.
 DEFAULT_TITLE_PT = 32
+# A heading introduces the content; past this share of the band it replaces it.
+_TITLE_MAX_BAND_SHARE = 0.4
+_MIN_CONTENT_TITLE_PT = 18
 
 # Used only when the template's own cover size cannot be measured.
 DEFAULT_COVER_PT = 40
@@ -546,6 +549,19 @@ def _add_title(slide, bounds, text, font_name, color_hex, size_pt=None, resolver
     # real templates. iter18 capped the comparison columns for exactly this; the
     # title needs the same guard, and it is the most visible text on the slide.
     size_pt = cap_size_to_longest_word(text, width, size_pt, metrics=metrics, bold=True)
+    # …and capped by the SHARE of the band it is allowed to take. The template's
+    # own size is right for the template's own titles; a long one set at that
+    # size takes four lines and eats the slide. Measured on the T-Zh mono deck
+    # with a 58-character heading: the title box came out 3.51in of a 5.62in
+    # slide — 62% — and the two comparison columns it introduces were squeezed
+    # into a strip at the bottom, while the template's own titles run 8-23% of
+    # the slide (median across the corpus).
+    band_in = Emu(max(1, bounds["bottom"] - bounds["top"])).inches
+    while size_pt > _MIN_CONTENT_TITLE_PT:
+        if (estimate_block_height_in(text, Emu(width).inches, size_pt, metrics=metrics)
+                <= band_in * _TITLE_MAX_BAND_SHARE):
+            break
+        size_pt -= 2
     height_in = estimate_block_height_in(text, Emu(width).inches, size_pt, metrics=metrics) + 0.25
     box = slide.shapes.add_textbox(bounds["left"], bounds["top"], width, Emu(int(Inches(height_in))))
     tf = box.text_frame

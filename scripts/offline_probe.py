@@ -93,6 +93,40 @@ LONG = {
                 "subtitle": "Две недели на подключение и обучение команды"},
 }
 
+# A third brief, with the TITLES long. The last two defects — a cover title
+# running through the balloon artwork and a running header cut to «ЕДИНАЯ
+# ПЛАТФОРМА УПРАВЛЕНЧЕСКОЙ» — were both found on decks assembled by hand,
+# because LONG and SHORT differ in the length of their BODY text and keep the
+# titles short. Anything that depends on a title's length was invisible here.
+WORDY = {
+    "title": {"type": "title",
+              "title": "Единая платформа управленческой отчётности и аналитики для розничной сети",
+              "subtitle": "Итоги пилотного внедрения в трёх подразделениях за четвёртый квартал"},
+    "bullet_list": {"type": "bullet_list",
+                    "title": "Что мешало собирать управленческую отчётность вовремя и без ручной сверки",
+                    "bullets": ["Ручной сбор показателей из семи независимых систем",
+                                "Разные форматы выгрузок у каждого подразделения",
+                                "Согласование занимало до двух недель"]},
+    "stats_kpi": {"type": "stats_kpi",
+                  "title": "Результаты пилотного внедрения в трёх подразделениях за квартал",
+                  "stats": [["-40%", "времени на подготовку регулярной отчётности"],
+                            ["+18", "подключённых клиентов ежемесячно"],
+                            ["4 дня", "на полное внедрение в подразделении"]]},
+    "two_column_comparison": {"type": "two_column_comparison",
+                              "title": "Как изменился процесс подготовки управленческой отчётности",
+                              "left_heading": "Было",
+                              "left_points": ["Ручной сбор показателей", "Разрозненные файлы в почте"],
+                              "right_heading": "Стало",
+                              "right_points": ["Автоматический сбор по расписанию", "Единая витрина данных"]},
+    "image_caption": {"type": "image_caption",
+                      "title": "Как выглядит витрина данных в интерфейсе руководителя подразделения",
+                      "image": "экран дашборда с графиком отгрузок по неделям"},
+    "closing": {"type": "closing",
+                "title": "Запустим пилот в вашем подразделении уже в этом квартале",
+                "subtitle": "Две недели на подключение и обучение команды"},
+}
+
+
 SHORT = {
     "title": {"type": "title", "title": "Платформа Поток", "subtitle": "Итоги квартала"},
     "bullet_list": {"type": "bullet_list", "title": "Что мешало",
@@ -211,7 +245,7 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--content", choices=("long", "short"), default="long")
+    ap.add_argument("--content", choices=("long", "short", "wordy"), default="long")
     ap.add_argument("--only", default=None, help="probe one template by name")
     ap.add_argument("--items", type=int, default=None,
                     help="how many bullets the brief asks for (default: the outline's 3) "
@@ -219,7 +253,7 @@ def main():
     ap.add_argument("--out", default=OUT_ROOT)
     args = ap.parse_args()
 
-    blocks = LONG if args.content == "long" else SHORT
+    blocks = {"long": LONG, "short": SHORT, "wordy": WORDY}[args.content]
     outline = OUTLINE
     if args.items:
         blocks = {k: dict(v) for k, v in blocks.items()}
