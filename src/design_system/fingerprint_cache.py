@@ -22,7 +22,7 @@ import os
 # next put) — without this, a poisoned/outdated label replays forever: a T-Ж
 # template was re-classified twice with zero LLM calls, both times faithfully
 # reproducing the WRONG labels cached by the very first buggy run.
-CLASSIFIER_VERSION = 3
+CLASSIFIER_VERSION = 4
 
 
 class FingerprintCache:

@@ -77,10 +77,27 @@ def _describe_slide(slide_struct, slide_size_in=None):
     for shape in slide_struct["shapes"]:
         role = shape.get("placeholder_type") or shape["shape_type"]
         geo = shape["geometry_in"]
+        # PARAGRAPH STRUCTURE, not a flattened string. Everything above was
+        # measured for survey-31 and its parse is still 1 slide of 31: the
+        # reason is here. Its content slides are "title + one text box", and
+        # that box holds 4, 5, 7, 8 separate paragraphs — unmistakable bullet
+        # lists — which this line joined into a single 80-character run-on.
+        # The model was being asked to tell a list from prose with the list-ness
+        # removed, so it shrugged, and every deck built on that template got
+        # every content slide synthesized.
         snippet = ""
+        paragraph_note = ""
         if shape["text"]:
-            flat = " ".join(run["text"] for para in shape["text"] for run in para if run["text"])
-            snippet = flat[:80]
+            paragraphs = [
+                " ".join(run["text"] for run in para if run["text"]).strip()
+                for para in shape["text"]
+            ]
+            paragraphs = [para for para in paragraphs if para]
+            if len(paragraphs) > 1:
+                paragraph_note = f", {len(paragraphs)} paragraphs"
+                snippet = " | ".join(para[:60] for para in paragraphs[:3])
+            else:
+                snippet = (paragraphs[0] if paragraphs else "")[:80]
         # Only when the file states it: Google-Slides exports leave most runs
         # unsized, and inventing a number there would be worse than silence
         # (the "title = biggest font" heuristic is blind on those decks — see
@@ -89,7 +106,7 @@ def _describe_slide(slide_struct, slide_size_in=None):
         font = f", font {size_pt:g}pt" if size_pt else ""
         lines.append(
             f'- {role} at ({geo["left"]}, {geo["top"]}) '
-            f'size {geo["width"]}x{geo["height"]}{font}: "{snippet}"')
+            f'size {geo["width"]}x{geo["height"]}{font}{paragraph_note}: "{snippet}"')
     return "\n".join(lines)
 
 
