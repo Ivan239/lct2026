@@ -188,4 +188,14 @@ def format_report(result):
             lines.append(f"- [{v['score']}] {cid} {v['title']} — {v['detail']}")
     else:
         lines.append("- нет (все оценённые критерии ≥ 4)")
+
+    # Blind spots are reported even when nothing scored low — the report lists
+    # only score<=3, so a healthy deck's 1.1 sits at 5 and the "could not be
+    # measured" note it carries would never reach a reader. That is the exact
+    # failure this note exists to prevent, one level up.
+    blind = [i + 1 for i, n in enumerate(result["contrast"].get("unmeasured_boxes") or []) if n]
+    if blind:
+        lines.append("")
+        lines.append(f"## Не проверено\n- контраст на слайдах {blind}: "
+                     "текст лежит на картинке, фона для замера нет — смотри глазами")
     return "\n".join(lines)

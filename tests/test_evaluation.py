@@ -957,3 +957,19 @@ def test_unmeasurable_boxes_are_named_not_passed_over(tmp_path):
     assert res["coverage"] == (1, 1), "the slide has a measurable box, so it IS covered"
     assert res["unmeasured_boxes"] == [1], (
         f"the photo-backed box was passed over silently: {res['unmeasured_boxes']}")
+
+
+def test_report_names_blind_spots_even_when_nothing_scored_low():
+    """The report lists only criteria at score<=3. A healthy deck's 1.1 sits at
+    5, so the "could not be measured" note it carries would never reach a
+    reader — the exact silence the note exists to break, one level up."""
+    from evaluation.evaluate import format_report
+
+    base = {
+        "label": "x", "total_100": 99.0, "llm_evaluated": False,
+        "buckets": {}, "scores": {}, "contrast": {},
+    }
+    assert "Не проверено" not in format_report(dict(base, contrast={"unmeasured_boxes": [0, 0]}))
+
+    blind = format_report(dict(base, contrast={"unmeasured_boxes": [0, 2, 0]}))
+    assert "Не проверено" in blind and "[2]" in blind, blind
