@@ -39,6 +39,7 @@ def _synthesized_cover(template):
     own = _pick_title_shape(list(prs.slides)[0], set())
     theme["cover_align"] = own.text_frame.paragraphs[0].alignment if own is not None else None
     theme["cover_left"] = int(own.left) if own is not None and own.left is not None else None
+    theme["cover_top"] = int(own.top) if own is not None and own.top is not None else None
     idx = synthesize_title(prs, theme, infer_content_bounds(extract_template(template)), COVER,
                            resolver=FontResolver(template, extract_theme(template)))
     slide = prs.slides[idx]
@@ -65,6 +66,21 @@ def test_cover_takes_the_left_margin_and_alignment_from_the_template():
         assert int(subtitle.left) == int(title.left), "subtitle must share the title's edge"
 
 
+@requires(TJ_MONO)
+@requires(SURVEY_31)
+def test_cover_takes_its_top_from_the_template_too():
+    """A flat 38% of the slide height matched exactly one template of five.
+    Measured tops: 26 / 37 / 4 / 22 / 26% — mono opens hard against the top edge
+    at 0.24in, survey-31 at 1.94in, so no constant satisfies both."""
+    for template in (TJ_MONO, SURVEY_31):
+        source = Presentation(template)
+        own_title = _pick_title_shape(list(source.slides)[0], set())
+        title, _ = _synthesized_cover(template)
+        assert int(title.top) == int(own_title.top), (
+            f"{template}: cover top {Emu(title.top).inches:.2f}in, the template's own "
+            f"{Emu(own_title.top).inches:.2f}in")
+
+
 @requires(TJ_UNIVERSAL)
 def test_the_cover_still_fits_the_slide_from_its_new_left_edge():
     """Moving the block right must not push it off the other side: the width is
@@ -81,8 +97,9 @@ def test_a_template_without_a_readable_title_keeps_the_old_placement():
     """The fallback must survive: no measurement, no change in behaviour."""
     prs = Presentation(SURVEY_31)
     theme = apply_observed_style(extract_theme(SURVEY_31), observe_deck_style(prs))
-    theme["cover_align"], theme["cover_left"] = None, None
+    theme["cover_align"], theme["cover_left"], theme["cover_top"] = None, None, None
     idx = synthesize_title(prs, theme, infer_content_bounds(extract_template(SURVEY_31)), COVER)
     title = next(s for s in prs.slides[idx].shapes
                  if s.has_text_frame and s.text_frame.text.strip() == COVER["title"])
     assert int(title.left) == int(prs.slide_width * 0.1)
+    assert int(title.top) == int(prs.slide_height * 0.38)

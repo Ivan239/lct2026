@@ -61,6 +61,7 @@ def _theme_palette(theme):
         "cover_pt": theme.get("cover_pt"),
         "cover_align": theme.get("cover_align"),
         "cover_left": theme.get("cover_left"),
+        "cover_top": theme.get("cover_top"),
     }
 
 
@@ -603,7 +604,14 @@ def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None
     # render showed «Итоги внедрения за квартал» printed straight through it.
     # Same lesson as iter35 — reserve from the real box, never from an offset
     # that happens to work at one size.
-    title_top = int(height * 0.38)
+    # From the template's own cover, like the size and the left margin: the flat
+    # 38% matched one template of five (26/37/4/22/26% measured), and on mono —
+    # which opens hard against the top edge at 4% — it invented a third of a
+    # slide of air above the title.
+    title_top = t.get("cover_top")
+    if title_top is None:
+        title_top = int(height * 0.38)
+    title_top = max(0, min(int(title_top), int(height * 0.6)))
 
     # …and capped again by the HEIGHT actually available below title_top. The
     # width cap above only stops mid-word breaks; nothing stopped the block

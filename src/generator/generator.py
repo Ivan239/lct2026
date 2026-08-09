@@ -1591,7 +1591,7 @@ def _template_cover_pt(prs):
 
 
 def _template_cover_layout(prs):
-    """(alignment, left_emu) of the template's own COVER title, or (None, None).
+    """(alignment, left_emu, top_emu) of the template's own COVER title.
 
     Synthesized covers and closings were centred unconditionally in a box inset
     10% from each edge. Measured on the five real templates, EVERY title is left
@@ -1601,16 +1601,22 @@ def _template_cover_layout(prs):
 
     Alignment None in the XML means "inherit", which resolves to left; it is
     reported as None here so the caller can tell "the designer said left" from
-    "the designer said nothing", and both end up left."""
+    "the designer said nothing", and both end up left.
+
+    The TOP is measured for the same reason the size and the left margin are:
+    a flat 38% of the slide height matched exactly one of the five real
+    templates. Measured — 26 / 37 / 4 / 22 / 26% — mono opens its cover hard
+    against the top edge, and a third of a slide of invented air above the
+    title is not that template."""
     slides = list(prs.slides)
     if not slides:
-        return None, None
+        return None, None, None
     title = _pick_title_shape(slides[0], set())
-    if title is None or title.left is None:
-        return None, None
+    if title is None or title.left is None or title.top is None:
+        return None, None, None
     paragraphs = title.text_frame.paragraphs
     alignment = paragraphs[0].alignment if paragraphs else None
-    return alignment, int(title.left)
+    return alignment, int(title.left), int(title.top)
 
 
 def _template_title_pt(prs):
@@ -1689,7 +1695,8 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
                 # at the deck's own title size instead of a flat 32pt.
                 synth_theme["title_pt"] = _template_title_pt(prs)
                 synth_theme["cover_pt"] = _template_cover_pt(prs)
-                synth_theme["cover_align"], synth_theme["cover_left"] = _template_cover_layout(prs)
+                (synth_theme["cover_align"], synth_theme["cover_left"],
+                 synth_theme["cover_top"]) = _template_cover_layout(prs)
                 bounds_computed = True
             # Measured background of the ORIGINAL canvas slide (from the
             # render), so the synthesizer can rescue text that would land
