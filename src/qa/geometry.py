@@ -23,6 +23,9 @@ from generator.text_fit import (
 # percent of slack keeps this pass from "fixing" text that actually fits.
 OVERFLOW_TOLERANCE = 1.05
 
+# Below this a shrink stops being a fix and becomes microtext.
+MIN_READABLE_PT = 9
+
 
 def _shape_texts(shape):
     return [
@@ -199,8 +202,21 @@ def enforce_text_fits(prs, resolver, slide_indices=None):
             if estimated <= height_in * OVERFLOW_TOLERANCE:
                 continue
 
+            # Readability floor, the same absolute one the filler keeps
+            # (generator._fit_size_for_shape): past it the problem is that the
+            # CONTENT is too long, and microtext is worse than the slight
+            # overflow this pass exists to remove. Without it this pass silently
+            # undid that rule — a 49-character bullet in a one-line 2.86x0.24in
+            # slot was fitted at 13pt and then taken to 8pt here, unreadable on
+            # the render.
+            #
+            # ABSOLUTE, not a fraction of the current size: a relative floor was
+            # tried and it broke idempotence, because each pass would re-floor
+            # against its own output (60 -> 42 -> 29 on the survey fixture) and
+            # a genuinely oversized block would stop mid-way instead of fitting.
             new_size = fit_font_size(
                 texts, shape.width, usable_height_emu, size_pt,
+                min_size_pt=MIN_READABLE_PT,
                 metrics=metrics, line_spacing=line_spacing, margins_in=margins_in,
             )
             if new_size.pt >= size_pt:

@@ -38,3 +38,44 @@ def test_no_metrics_no_touch():
     prs = Presentation(SURVEY_31)
     fixes = enforce_text_fits(prs, resolver=None)
     assert fixes == []
+
+
+def test_shrinking_stops_at_the_readability_floor(tmp_path):
+    """This pass removes overflow by shrinking, and without a floor it shrinks
+    into microtext: measured on a real deck, a 49-character bullet in a one-line
+    2.86x0.24in slot was fitted at 13pt by the filler and then taken to 8pt
+    here, plainly unreadable on the render. The filler already refuses to go
+    that far (generator._fit_size_for_shape); this pass was silently undoing it.
+
+    The floor is ABSOLUTE, not a fraction of the current size. A relative floor
+    was tried first and broke idempotence — each pass re-floored against its own
+    output (60 -> 42 -> 29 on the survey fixture), so a genuinely oversized block
+    stopped part-way instead of being fitted."""
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+
+    from fonts.metrics import FontResolver
+    from qa.geometry import MIN_READABLE_PT, enforce_text_fits
+    from template_parser.parser import extract_theme
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Inches(10), Inches(5.63)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    box = slide.shapes.add_textbox(Inches(1), Inches(2), Inches(2.86), Inches(0.24))
+    box.text_frame.word_wrap = True
+    box.text_frame.text = "Ручной сбор показателей из семи независимых систем"
+    run = box.text_frame.paragraphs[0].runs[0]
+    run.font.size, run.font.name = Pt(13), "Arial"
+
+    path = str(tmp_path / "tiny.pptx")
+    prs.save(path)
+    prs = Presentation(path)
+    resolver = FontResolver(path, extract_theme(path))
+
+    enforce_text_fits(prs, resolver)
+    sizes = [r.font.size.pt for s in prs.slides for sh in s.shapes if sh.has_text_frame
+             for p in sh.text_frame.paragraphs for r in p.runs if r.font.size]
+    assert sizes and min(sizes) >= MIN_READABLE_PT, f"shrunk into microtext: {sizes}"
+
+    # And the pass still settles: a second run changes nothing.
+    assert enforce_text_fits(prs, resolver) == []
