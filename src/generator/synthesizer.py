@@ -163,6 +163,46 @@ _SIDE_STRIP_MIN_COVERAGE = 0.5
 _SIDE_STRIP_MAX_WIDTH_FRACTION = 0.2
 
 
+def _widen_to_template_if_clear(bounds, template_bounds, slide, slide_width, slide_height):
+    """Grow a canvas-derived band sideways to the template's own width, but only
+    into space that is actually empty.
+
+    The canvas's own text extent is a good guide until it is simply narrower
+    than the layout: the T-Zh study canvas ends its text at 7.59in on a card
+    running to 9.6in, so the synthesized comparison got 3.50in columns and the
+    render showed «Автоматический сбор по / расписанию» wrapping while two
+    inches of card sat empty beside it. Same argument iter32 makes for a band
+    that is too SHORT, applied to width.
+
+    Blind widening would be wrong — plenty of canvases are narrow BY DESIGN,
+    with art filling the other half — so each side only moves if no picture
+    stands in the strip it would move into. A full-bleed background is not an
+    obstacle: everything sits on it anyway."""
+    left, right = int(bounds["left"]), int(bounds["right"])
+    top, bottom = int(bounds["top"]), int(bounds["bottom"])
+    area = (slide_width or 1) * (slide_height or 1)
+
+    def _blocked(lo, hi):
+        for shape in slide.shapes:
+            if "PICTURE" not in str(shape.shape_type):
+                continue
+            if None in (shape.left, shape.top) or not (shape.width and shape.height):
+                continue
+            if (shape.width * shape.height) / area >= 0.9:
+                continue  # full-bleed background: not an obstacle
+            if int(shape.left) < hi and int(shape.left + shape.width) > lo \
+                    and int(shape.top) < bottom and int(shape.top + shape.height) > top:
+                return True
+        return False
+
+    t_left, t_right = int(template_bounds["left"]), int(template_bounds["right"])
+    if t_left < left and not _blocked(t_left, left):
+        left = t_left
+    if t_right > right and not _blocked(right, t_right):
+        right = t_right
+    return dict(bounds, left=Emu(left), right=Emu(right))
+
+
 def _clip_to_side_decor(bounds, slide, slide_width, slide_height):
     """Move the content's left/right edge past a decor strip running down it.
 
@@ -327,6 +367,8 @@ def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None)
         if bounds is None:
             bounds = _clip_to_canvas_chrome(
                 _resolve_bounds(prs, bounds_in), slide, prs.slide_height)
+        bounds = _widen_to_template_if_clear(
+            bounds, _resolve_bounds(prs, bounds_in), slide, prs.slide_width, prs.slide_height)
         bounds = _clip_to_side_decor(bounds, slide, prs.slide_width, prs.slide_height)
         for shape in removed:
             shape._element.getparent().remove(shape._element)

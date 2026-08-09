@@ -374,3 +374,42 @@ def test_content_starts_past_a_decor_strip_running_down_the_edge():
     prs2 = Presentation(SURVEY_31)
     _, _, _, plain = _prepare_blank_slide(prs2, theme, bounds_in, canvas_idx=29)
     assert int(plain["left"]) <= int(bounds["left"]), "unrelated canvas lost width"
+
+
+@requires(TJ)
+def test_canvas_band_widens_to_the_template_only_into_clear_space():
+    """A canvas's own text extent is a good guide until it is simply narrower
+    than the layout. The T-Zh study canvas ends its text at 7.59in on a card
+    running to 9.6in, so a synthesized comparison got 3.50in columns and the
+    render showed «Автоматический сбор по / расписанию» wrapping while two
+    inches of card sat empty. Same argument iter32 makes for a band that is too
+    SHORT, applied to width.
+
+    Blind widening would be wrong — this very template has canvases that are
+    narrow because a photo fills the rest — so each side moves only into space
+    no picture stands in. Both cases live on the same template on purpose."""
+    from pptx.util import Emu
+
+    from generator.deck_style import apply_observed_style, observe_deck_style
+    from generator.layout_bounds import infer_content_bounds
+    from generator.synthesizer import _prepare_blank_slide, _resolve_bounds
+    from template_parser.parser import extract_template, extract_theme
+
+    bounds_in = infer_content_bounds(extract_template(TJ))
+
+    prs = Presentation(TJ)
+    theme = apply_observed_style(extract_theme(TJ), observe_deck_style(prs))
+    template = _resolve_bounds(prs, bounds_in)
+    _, _, _, widened = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=8)
+    assert int(widened["right"]) == int(template["right"]), (
+        f"clear canvas kept a narrow band: {Emu(widened['right']).inches:.2f}in "
+        f"against the template's {Emu(template['right']).inches:.2f}in")
+
+    prs2 = Presentation(TJ)
+    theme2 = apply_observed_style(extract_theme(TJ), observe_deck_style(prs2))
+    _, _, _, kept = _prepare_blank_slide(prs2, theme2, bounds_in, canvas_idx=5)
+    art = [s for s in prs2.slides[5].shapes if "PICTURE" in str(s.shape_type)
+           and s.left is not None and s.width]
+    assert art, "fixture: canvas 5 is supposed to carry artwork"
+    assert int(kept["right"]) < int(template["right"]), (
+        f"content was widened into artwork: right={Emu(kept['right']).inches:.2f}in")
