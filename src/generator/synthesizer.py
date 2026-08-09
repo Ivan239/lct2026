@@ -11,8 +11,8 @@ from pptx.util import Emu, Inches, Pt
 
 from generator.deck_style import _luminance, _slide_bg_hex
 from generator.slide_kit import clone_slide, content_text_shapes
-from generator.text_fit import (cap_size_to_longest_word, estimate_block_height_in,
-                                fit_font_size)
+from generator.text_fit import (SINGLE_LINE_SAFETY, cap_size_to_longest_word,
+                                estimate_block_height_in, fit_font_size)
 
 # Used only when the template has too few real content shapes to infer bounds
 # from (see layout_bounds.infer_content_bounds returning None).
@@ -603,11 +603,21 @@ def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None
     subtitle = data.get("subtitle")
     sub_reserve = int(height * 0.12) + int(Inches(0.2)) if subtitle else 0
     avail_h = max(int(Inches(1.0)), int(height * 0.94) - title_top - sub_reserve)
-    cover_pt = fit_font_size(title_text, title_width, Emu(avail_h), cover_pt,
+    # Both the fit and the height are measured against a budget shortened by
+    # SINGLE_LINE_SAFETY, because a wrap prediction inside that margin cannot be
+    # trusted — CLAUDE.md records the renderer wrapping 2-4% earlier than
+    # fontTools advances predict. The closing of the T-Zh study deck is exactly
+    # that case: «Запустим пилот в вашем подразделении» measures 95.1% of its
+    # budget, the estimate said one line, the renderer drew two, and the
+    # subtitle — placed just under a one-line title — printed straight through
+    # the second one. Assuming the wrap costs nothing when it does not happen:
+    # the box is a little taller and the subtitle sits a little lower.
+    fit_width = Emu(int(title_width * SINGLE_LINE_SAFETY))
+    cover_pt = fit_font_size(title_text, fit_width, Emu(avail_h), cover_pt,
                              min_size_pt=_MIN_COVER_PT, metrics=metrics).pt
 
     title_h_in = estimate_block_height_in(
-        title_text, Emu(title_width).inches, cover_pt, metrics=metrics) + 0.15
+        title_text, Emu(fit_width).inches, cover_pt, metrics=metrics) + 0.15
     title_box = slide.shapes.add_textbox(
         Emu(int(width * 0.1)), Emu(title_top), title_width, Emu(int(Inches(title_h_in))))
     tf = title_box.text_frame
