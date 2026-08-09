@@ -693,12 +693,78 @@ def _align_left_edges(anchor_shape, *other_shapes, tolerance_emu=45720):
             shape.left = anchor_shape.left
 
 
+_SUBTITLE_SIZE_RATIO = 0.45
+
+
 def _fill_title(slide, data, claimed_ids, resolver=None):
     title_shape = _pick_title_shape(slide, claimed_ids)
     _set_run_text(title_shape, data.get("title", ""), claimed_ids, resolver=resolver)
     subtitle_shape = _pick_body_shape(slide, claimed_ids)
+    if subtitle_shape is None:
+        _append_subtitle_paragraph(title_shape, data.get("subtitle", ""), claimed_ids,
+                                   resolver=resolver, slide=slide)
+        return
     _align_left_edges(title_shape, subtitle_shape)
     _set_run_text(subtitle_shape, data.get("subtitle", ""), claimed_ids, resolver=resolver)
+
+
+def _append_subtitle_paragraph(shape, subtitle, claimed_ids, resolver=None, slide=None):
+    """Give the subtitle its own box under the title when the slide has no second one.
+
+    The survey template's closing is a single text box and a decorative heart,
+    so _pick_body_shape returns nothing and the subtitle the brief asked for was
+    dropped without a trace — «Две недели на подключение и обучение команды»
+    never reached any deck built on that slide. The box is 10.79x2.82in and the
+    title takes 1.2in of it, so there is room to say it.
+
+    A separate SHAPE, not a second paragraph of the title's box: the harness
+    reads a title as its box's whole text, so appending there made
+    «Запустим пилот… + Две недели…» a 99-character heading and criterion 2.1
+    reported a long title that does not exist. Same shape iter70 gave the
+    display stat's caption.
+
+    Sized up front rather than left to enforce_text_fits, which shrinks by
+    clamping every run to ONE size and would erase the hierarchy (iter55)."""
+    if shape is None or not subtitle or not shape.height or slide is None:
+        return
+    reference = _reference_run(shape)
+    title_pt = _max_font_pt(shape)
+    if not title_pt:
+        return
+    subtitle_pt = max(MIN_READABLE_PT, round(title_pt * _SUBTITLE_SIZE_RATIO))
+    metrics = _metrics_for_run(reference, resolver)
+    width_in = Emu(shape.width).inches
+    texts = [p.text for p in shape.text_frame.paragraphs if p.text.strip()]
+    top_inset, bottom_inset = vertical_insets_emu(shape)
+    usable_in = Emu(max(0, shape.height - top_inset - bottom_inset)).inches
+    needed = (estimate_block_height_in(texts, width_in, title_pt, metrics=metrics)
+              + estimate_block_height_in([subtitle], width_in, subtitle_pt, metrics=metrics))
+    if needed > usable_in:
+        return  # no room: better to drop it than to squash the closing line
+
+    title_in = estimate_block_height_in(texts, width_in, title_pt, metrics=metrics)
+    gap = int(Inches(0.25))
+    top = int(shape.top) + int(Inches(title_in)) + gap
+    height = int(Inches(estimate_block_height_in([subtitle], width_in, subtitle_pt,
+                                                 metrics=metrics) + 0.1))
+    if top + height > int(shape.top + shape.height):
+        return
+
+    box = slide.shapes.add_textbox(Emu(int(shape.left)), Emu(top),
+                                   Emu(int(shape.width)), Emu(height))
+    box.text_frame.word_wrap = True
+    box.text_frame.margin_left = shape.text_frame.margin_left
+    box.text_frame.margin_right = shape.text_frame.margin_right
+    box.text_frame.margin_top = 0
+    box.text_frame.text = subtitle
+    run = box.text_frame.paragraphs[0].runs[0]
+    if reference is not None:
+        _copy_run_format(reference, run)
+    run.font.size = Pt(subtitle_pt)
+    run.font.bold = False
+    # Claim it, or _clear_unclaimed_text blanks it later — the trap CLAUDE.md
+    # records for the page numbers and the running topic.
+    claimed_ids.add(box.shape_id)
 
 
 def _find_bullet_icons(slide, body_shape):
