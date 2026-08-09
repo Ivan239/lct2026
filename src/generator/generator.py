@@ -1590,6 +1590,29 @@ def _template_cover_pt(prs):
     return round(pt) if pt else None
 
 
+def _template_cover_layout(prs):
+    """(alignment, left_emu) of the template's own COVER title, or (None, None).
+
+    Synthesized covers and closings were centred unconditionally in a box inset
+    10% from each edge. Measured on the five real templates, EVERY title is left
+    aligned, at left margins of 0.39 / 0.19 / 0.39 / 1.10 / 1.10in — so a centred
+    block at 1.33in matched none of them, and the closing of a deck read as
+    coming from a different template than the slides before it.
+
+    Alignment None in the XML means "inherit", which resolves to left; it is
+    reported as None here so the caller can tell "the designer said left" from
+    "the designer said nothing", and both end up left."""
+    slides = list(prs.slides)
+    if not slides:
+        return None, None
+    title = _pick_title_shape(slides[0], set())
+    if title is None or title.left is None:
+        return None, None
+    paragraphs = title.text_frame.paragraphs
+    alignment = paragraphs[0].alignment if paragraphs else None
+    return alignment, int(title.left)
+
+
 def _template_title_pt(prs):
     """The size the TEMPLATE sets its own titles at, or None.
 
@@ -1666,6 +1689,7 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
                 # at the deck's own title size instead of a flat 32pt.
                 synth_theme["title_pt"] = _template_title_pt(prs)
                 synth_theme["cover_pt"] = _template_cover_pt(prs)
+                synth_theme["cover_align"], synth_theme["cover_left"] = _template_cover_layout(prs)
                 bounds_computed = True
             # Measured background of the ORIGINAL canvas slide (from the
             # render), so the synthesizer can rescue text that would land

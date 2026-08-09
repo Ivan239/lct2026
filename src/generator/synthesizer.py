@@ -59,6 +59,8 @@ def _theme_palette(theme):
         # stands.
         "title_pt": theme.get("title_pt"),
         "cover_pt": theme.get("cover_pt"),
+        "cover_align": theme.get("cover_align"),
+        "cover_left": theme.get("cover_left"),
     }
 
 
@@ -575,7 +577,17 @@ def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None
     width, height = prs.slide_width, prs.slide_height
 
     title_text = data.get("title", "")
-    title_width = Emu(int(width * 0.8))
+    # Placed and aligned like the template's own cover, not centred by default:
+    # all five real templates set their titles LEFT, at margins of 0.19-1.10in,
+    # while a centred block sat at 1.33in and matched none of them. Decided here,
+    # before the size is fitted, because the box the text must fit is this one.
+    align = t.get("cover_align") or PP_ALIGN.LEFT
+    title_left = t.get("cover_left")
+    if title_left is None:
+        title_left = int(width * 0.1)
+    title_width = Emu(max(int(Inches(2.0)),
+                          min(int(width * 0.8),
+                              int(width) - int(title_left) - int(Inches(0.3)))))
     # The template's own cover size, capped so a long title cannot be broken
     # mid-word: at the 92pt these survey decks use, an uncapped base would do
     # exactly what iter18/iter25 caught on content titles.
@@ -619,11 +631,11 @@ def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None
     title_h_in = estimate_block_height_in(
         title_text, Emu(fit_width).inches, cover_pt, metrics=metrics) + 0.15
     title_box = slide.shapes.add_textbox(
-        Emu(int(width * 0.1)), Emu(title_top), title_width, Emu(int(Inches(title_h_in))))
+        Emu(int(title_left)), Emu(title_top), title_width, Emu(int(Inches(title_h_in))))
     tf = title_box.text_frame
     tf.word_wrap = True
     tf.text = title_text
-    tf.paragraphs[0].alignment = PP_ALIGN.CENTER
+    tf.paragraphs[0].alignment = align
     _style_paragraph(tf.paragraphs[0], t["major_font"], cover_pt, t["accent"], bold=True)
 
     if subtitle:
@@ -632,12 +644,12 @@ def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None
         # the subtitle on top of the title when the title overflowed.
         sub_top = int(title_top + title_box.height + int(Inches(0.2)))
         sub_box = slide.shapes.add_textbox(
-            Emu(int(width * 0.15)), Emu(sub_top), Emu(int(width * 0.7)), Emu(int(height * 0.12))
+            Emu(int(title_left)), Emu(sub_top), title_width, Emu(int(height * 0.12))
         )
         stf = sub_box.text_frame
         stf.word_wrap = True
         stf.text = subtitle
-        stf.paragraphs[0].alignment = PP_ALIGN.CENTER
+        stf.paragraphs[0].alignment = align
         _style_paragraph(stf.paragraphs[0], t["minor_font"], 20, t["text"])
 
     return idx
