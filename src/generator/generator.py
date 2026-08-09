@@ -8,6 +8,7 @@ from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Length, Pt
 
 from common.pictures import OVERSIZED_PICTURE_AREA_RATIO, is_stale_data_picture
+from common.phrases import drop_dangling_function_words
 from common.synthesis import SYNTHESIZE
 from fonts.metrics import FontResolver
 from generator.deck_style import apply_observed_style, observe_deck_style
@@ -1568,6 +1569,32 @@ TOPIC_SLOT_PROMPTS = {
 MAX_RUNNING_HEADER_CHARS = 42
 
 
+RUNNING_TOPIC_ELLIPSIS = "…"
+
+
+def _shorten_running_topic(title):
+    """The deck's topic, cut to the header slot — and marked as cut.
+
+    Trimming at a word boundary alone ships a phrase that LOOKS whole and is
+    not: «Единая платформа управленческой отчётности и аналитики для розничной
+    сети» became «ЕДИНАЯ ПЛАТФОРМА УПРАВЛЕНЧЕСКОЙ», an adjective governing a
+    noun that is no longer there, printed on every slide of the deck. Two other
+    real titles cut the same way («…ВНЕДРЕНИЯ В ТРЁХ»).
+
+    So: drop a trailing function word the way iter56 does for bullets — a header
+    must not end on a preposition either — and add an ellipsis, which is what
+    tells the reader the topic is shortened rather than mangled."""
+    if len(title) <= MAX_RUNNING_HEADER_CHARS:
+        return title
+    budget = MAX_RUNNING_HEADER_CHARS - len(RUNNING_TOPIC_ELLIPSIS)
+    head = title[:budget + 1]
+    if " " not in head:
+        return title  # one very long word: _fits_box_width decides its fate
+    cut = head.rsplit(" ", 1)[0].rstrip(".,;:—- ")
+    cut = drop_dangling_function_words(cut) or cut
+    return cut + RUNNING_TOPIC_ELLIPSIS
+
+
 def _fill_running_topic(prs, deck_title, resolver=None):
     """Replace the template's topic placeholder with the deck's real topic.
 
@@ -1588,9 +1615,7 @@ def _fill_running_topic(prs, deck_title, resolver=None):
             original = runs[0].text.strip()
             if original.lower() not in TOPIC_SLOT_PROMPTS:
                 continue
-            topic = deck_title.strip()
-            if len(topic) > MAX_RUNNING_HEADER_CHARS:
-                topic = topic[:MAX_RUNNING_HEADER_CHARS].rsplit(" ", 1)[0].rstrip(".,;:—- ")
+            topic = _shorten_running_topic(deck_title.strip())
             topic = topic.upper() if original.isupper() else topic
             # Trimming by character count is not enough: a header box is small
             # and one long word can still be wider than it, which the renderer

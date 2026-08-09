@@ -16,6 +16,7 @@ import json
 import re
 
 from common.json_utils import extract_json
+from common.phrases import DANGLING_TAIL_WORDS, drop_dangling_function_words
 from common.model_fallback import TEXT_MODELS, call_with_model_fallback
 from common.synthesis import SYNTHESIZABLE_TYPES
 from template_spec.builder import describe_for_prompt
@@ -328,25 +329,11 @@ def _trim_to_budget(item, max_chars):
     return _drop_dangling_function_words(trimmed) or item
 
 
-# A phrase must not END on a preposition or conjunction. Cutting at a word
-# boundary is not enough: the T-Zh study slot budget is 28 characters, and real
-# bullets came out as «Ручной сбор показателей из», «Разные форматы выгрузок у»,
-# «Согласование занимало до» — each reads as a sentence chopped mid-thought, and
-# each shipped to the user that way.
-_DANGLING_TAIL_WORDS = {
-    "и", "а", "но", "или", "что", "как", "чем", "же", "ли", "бы",
-    "в", "во", "на", "за", "по", "из", "изо", "с", "со", "к", "ко", "у", "о",
-    "об", "обо", "от", "до", "для", "при", "про", "над", "под", "перед", "без",
-    "через", "между", "около", "после", "не", "ни",
-}
-
-
-def _drop_dangling_function_words(text):
-    """Strip trailing prepositions/conjunctions left behind by a trim."""
-    words = text.split()
-    while words and words[-1].lower().strip(".,;:—-") in _DANGLING_TAIL_WORDS:
-        words.pop()
-    return " ".join(words)
+# Both live in common/phrases.py now: the running-header slot needs the same
+# rule, and generator cannot import this module (it would close a cycle through
+# template_spec.builder).
+_DANGLING_TAIL_WORDS = DANGLING_TAIL_WORDS
+_drop_dangling_function_words = drop_dangling_function_words
 
 
 def _enforce_text_budgets(block, role, max_chars=MAX_BULLET_CHARS):
