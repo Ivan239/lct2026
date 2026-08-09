@@ -156,6 +156,71 @@ def _band_height(bounds):
 # Clearance between synthesized content and the canvas's own header/footer.
 _CHROME_GAP_EMU = int(Inches(0.12))
 
+# A decor strip is only worth stepping around sideways if it runs down most of
+# the band (otherwise the vertical avoidance in _centered_top handles it) and is
+# narrow enough that giving it up costs little width.
+_SIDE_STRIP_MIN_COVERAGE = 0.5
+_SIDE_STRIP_MAX_WIDTH_FRACTION = 0.2
+
+
+def _clip_to_side_decor(bounds, slide, slide_width, slide_height):
+    """Move the content's left/right edge past a decor strip running down it.
+
+    _centered_top steps around decor VERTICALLY, which cannot help when the art
+    is a column: the survey-31 canvas keeps seven small blobs at x 0.45-1.16in
+    spanning y 1.96-6.71 — 80% of the band's height — and the KPI text starts at
+    x 0.45, so the render showed a blob sitting on «-40%» and on its caption.
+    There is no clear horizontal band to move into, only a narrower one to start
+    from."""
+    left, right = int(bounds["left"]), int(bounds["right"])
+    band = max(1, int(bounds["bottom"]) - int(bounds["top"]))
+    max_strip = int(slide_width * _SIDE_STRIP_MAX_WIDTH_FRACTION)
+
+    # Coverage is a property of the STRIP, not of one shape: each of those seven
+    # blobs spans about 10% of the band on its own, and only together do they
+    # make a column worth stepping around. Merge the spans before judging.
+    at_left, at_right = [], []
+    for shape in slide.shapes:
+        if "PICTURE" not in str(shape.shape_type):
+            continue
+        if None in (shape.left, shape.top) or not (shape.width and shape.height):
+            continue
+        if (shape.width * shape.height) / (slide_width * slide_height) >= _OBSTACLE_MAX_AREA_FRACTION:
+            continue
+        if shape.width > max_strip:
+            continue
+        span = (max(int(shape.top), int(bounds["top"])),
+                min(int(shape.top + shape.height), int(bounds["bottom"])))
+        if span[1] <= span[0]:
+            continue
+        # Tolerance, not equality: these blobs alternate between 0.4507in and
+        # 0.4537in — a few EMU — and a strict "starts at or before the band's
+        # left edge" dropped four of the seven, taking coverage from 70% to 31%
+        # and silently disabling the whole check.
+        if int(shape.left) <= left + _CHROME_GAP_EMU and int(shape.left + shape.width) > left:
+            at_left.append((span, int(shape.left + shape.width)))
+        elif int(shape.left + shape.width) >= right - _CHROME_GAP_EMU and int(shape.left) < right:
+            at_right.append((span, int(shape.left)))
+
+    def _covered(spans):
+        merged, total = [], 0
+        for lo, hi in sorted(s for s, _ in spans):
+            if merged and lo <= merged[-1][1]:
+                merged[-1] = (merged[-1][0], max(merged[-1][1], hi))
+            else:
+                merged.append((lo, hi))
+        for lo, hi in merged:
+            total += hi - lo
+        return total / band
+
+    if at_left and _covered(at_left) >= _SIDE_STRIP_MIN_COVERAGE:
+        left = max(edge for _, edge in at_left) + _CHROME_GAP_EMU
+    if at_right and _covered(at_right) >= _SIDE_STRIP_MIN_COVERAGE:
+        right = min(edge for _, edge in at_right) - _CHROME_GAP_EMU
+    if right - left < slide_width * 0.3:
+        return bounds  # nothing usable left; leave it alone
+    return dict(bounds, left=Emu(left), right=Emu(right))
+
 
 def _clip_to_canvas_chrome(bounds, slide, slide_height):
     """Keep template-wide bounds clear of the furniture the CANVAS still carries.
@@ -262,6 +327,7 @@ def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None)
         if bounds is None:
             bounds = _clip_to_canvas_chrome(
                 _resolve_bounds(prs, bounds_in), slide, prs.slide_height)
+        bounds = _clip_to_side_decor(bounds, slide, prs.slide_width, prs.slide_height)
         for shape in removed:
             shape._element.getparent().remove(shape._element)
         _blank_ownerless_chrome(slide, prs.slide_height)

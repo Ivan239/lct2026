@@ -335,3 +335,42 @@ def test_cover_subtitle_clears_a_title_at_the_templates_own_size():
     assert int(subtitle.top) >= int(title.top + title.height), (
         f"subtitle at {Emu(subtitle.top).inches:.2f}in runs into a title ending at "
         f"{Emu(title.top + title.height).inches:.2f}in")
+
+
+@requires(SURVEY_31)
+def test_content_starts_past_a_decor_strip_running_down_the_edge():
+    """_centered_top steps around canvas decor VERTICALLY, which cannot help
+    when the art is a column. The survey-31 canvas keeps seven small blobs at
+    x 0.45-1.16in spanning y 1.96-6.71 — 70% of the band's height once merged —
+    and the KPI text started at x 0.45, so the render showed a blob sitting on
+    «-40%» and on its caption. There is no clear horizontal band to move into,
+    only a narrower one to start from.
+
+    Coverage is a property of the STRIP: each blob covers about 10% of the band
+    alone. And the edge test needs a tolerance, not equality — these blobs
+    alternate between 0.4507in and 0.4537in, and a strict "starts at or before
+    the band's left edge" dropped four of the seven, taking coverage to 31% and
+    silently disabling the check."""
+    from pptx.util import Emu
+
+    from generator.deck_style import apply_observed_style, observe_deck_style
+    from generator.layout_bounds import infer_content_bounds
+    from generator.synthesizer import _prepare_blank_slide
+    from template_parser.parser import extract_template, extract_theme
+
+    prs = Presentation(SURVEY_31)
+    theme = apply_observed_style(extract_theme(SURVEY_31), observe_deck_style(prs))
+    bounds_in = infer_content_bounds(extract_template(SURVEY_31))
+
+    slide, _, _, bounds = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=24)
+    strip = [s for s in slide.shapes if "PICTURE" in str(s.shape_type)]
+    assert len(strip) >= 5, "fixture: this canvas is supposed to carry a decor column"
+    strip_right = max(int(s.left + s.width) for s in strip)
+    assert int(bounds["left"]) >= strip_right, (
+        f"content starts at {Emu(bounds['left']).inches:.2f}in, inside a decor strip "
+        f"ending at {Emu(strip_right).inches:.2f}in")
+
+    # A canvas without a side strip keeps its full width.
+    prs2 = Presentation(SURVEY_31)
+    _, _, _, plain = _prepare_blank_slide(prs2, theme, bounds_in, canvas_idx=29)
+    assert int(plain["left"]) <= int(bounds["left"]), "unrelated canvas lost width"
