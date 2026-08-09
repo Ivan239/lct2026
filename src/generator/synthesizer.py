@@ -11,7 +11,8 @@ from pptx.util import Emu, Inches, Pt
 
 from generator.deck_style import _luminance, _slide_bg_hex
 from generator.slide_kit import clone_slide, content_text_shapes
-from generator.text_fit import cap_size_to_longest_word, estimate_block_height_in
+from generator.text_fit import (cap_size_to_longest_word, estimate_block_height_in,
+                                fit_font_size)
 
 # Used only when the template has too few real content shapes to infer bounds
 # from (see layout_bounds.infer_content_bounds returning None).
@@ -94,6 +95,9 @@ DEFAULT_TITLE_PT = 32
 
 # Used only when the template's own cover size cannot be measured.
 DEFAULT_COVER_PT = 40
+# A cover that shrinks below this is no longer a cover; a title that long is a
+# content problem, not a sizing one.
+_MIN_COVER_PT = 28
 
 
 def _recolor_for_canvas(palette, canvas_bg):
@@ -587,9 +591,23 @@ def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None
     # render showed «Итоги внедрения за квартал» printed straight through it.
     # Same lesson as iter35 — reserve from the real box, never from an offset
     # that happens to work at one size.
+    title_top = int(height * 0.38)
+
+    # …and capped again by the HEIGHT actually available below title_top. The
+    # width cap above only stops mid-word breaks; nothing stopped the block
+    # itself from running off the slide. The survey cover's 90pt title took
+    # three lines and its box ran to 8.75in on a 7.5in slide, so «отчётности»
+    # was cut by the bottom edge — and the subtitle's own safety clamp
+    # (height*0.88) then placed it INSIDE the overflowing title, printing one
+    # through the other. Reserve the subtitle's band first, then fit.
+    subtitle = data.get("subtitle")
+    sub_reserve = int(height * 0.12) + int(Inches(0.2)) if subtitle else 0
+    avail_h = max(int(Inches(1.0)), int(height * 0.94) - title_top - sub_reserve)
+    cover_pt = fit_font_size(title_text, title_width, Emu(avail_h), cover_pt,
+                             min_size_pt=_MIN_COVER_PT, metrics=metrics).pt
+
     title_h_in = estimate_block_height_in(
         title_text, Emu(title_width).inches, cover_pt, metrics=metrics) + 0.15
-    title_top = int(height * 0.38)
     title_box = slide.shapes.add_textbox(
         Emu(int(width * 0.1)), Emu(title_top), title_width, Emu(int(Inches(title_h_in))))
     tf = title_box.text_frame
@@ -598,10 +616,11 @@ def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None
     tf.paragraphs[0].alignment = PP_ALIGN.CENTER
     _style_paragraph(tf.paragraphs[0], t["major_font"], cover_pt, t["accent"], bold=True)
 
-    subtitle = data.get("subtitle")
     if subtitle:
-        sub_top = min(int(title_top + title_box.height + int(Inches(0.2))),
-                      int(height * 0.88))
+        # No clamp against the slide bottom here: the fit above guarantees the
+        # title ends above the reserved band, and a clamp is exactly what put
+        # the subtitle on top of the title when the title overflowed.
+        sub_top = int(title_top + title_box.height + int(Inches(0.2)))
         sub_box = slide.shapes.add_textbox(
             Emu(int(width * 0.15)), Emu(sub_top), Emu(int(width * 0.7)), Emu(int(height * 0.12))
         )
