@@ -605,6 +605,37 @@ def _remove_orphan_marker_columns(slide):
                 marker._element.getparent().remove(marker._element)
 
 
+_HOLE_MIN_GAP_EMU = Emu(int(Inches(0.3)))
+
+
+def _close_hole_left_by(slide, top, bottom):
+    """Pull the text that sat BELOW a removed picture up into the space it left.
+
+    Removing someone else's chart is right (its data goes stale next to new
+    text), but it leaves a hole the size of the chart, and the designer put the
+    summary paragraph UNDER it. Measured on the survey template's slide 6: the
+    chart ran 2.05-4.37in and the body stayed at 4.56, so a generated slide had
+    a 2.70in void — a third of the slide — between the heading and three lines
+    stranded at the bottom.
+
+    Only shapes wholly below the picture move, and only far enough to leave a
+    gap under whatever ends above it: nothing may slide into another box."""
+    ceiling = top
+    for shape in slide.shapes:
+        if shape.top is None or not shape.height:
+            continue
+        shape_bottom = int(shape.top + shape.height)
+        if shape_bottom <= top:
+            ceiling = max(ceiling, shape_bottom + int(_HOLE_MIN_GAP_EMU))
+    lift = int(bottom - ceiling)
+    if lift <= 0:
+        return
+    for shape in slide.shapes:
+        if shape.top is None or not shape.height or int(shape.top) < bottom:
+            continue
+        shape.top = Emu(max(int(ceiling), int(shape.top) - lift))
+
+
 def _remove_oversized_pictures(slide, slide_width, slide_height):
     slide_area = (slide_width or 0) * (slide_height or 0)
     if not slide_area:
@@ -614,7 +645,9 @@ def _remove_oversized_pictures(slide, slide_width, slide_height):
             continue
         area = (shape.width or 0) * (shape.height or 0)
         if area / slide_area > OVERSIZED_PICTURE_AREA_RATIO and is_stale_data_picture(shape, slide):
+            top, bottom = int(shape.top or 0), int((shape.top or 0) + (shape.height or 0))
             shape._element.getparent().remove(shape._element)
+            _close_hole_left_by(slide, top, bottom)
 
 
 def _align_left_edges(anchor_shape, *other_shapes, tolerance_emu=45720):
