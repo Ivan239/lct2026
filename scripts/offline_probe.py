@@ -610,6 +610,40 @@ def title_sizes(deck_path, source_path=None, plan=None):
     return known, mode, stray
 
 
+def title_length_vs_template(deck_path, source_path):
+    """(our median title length, the template's) in characters.
+
+    Why it is printed next to the sizes: no sizing rule can make a title look
+    native when it is twice the length the template's own headings are. Measured
+    over the corpus — designers' medians 13 / 16 / 17 / 29 characters, ours 33 on
+    every template — and that gap is what turns every attempt at keeping the
+    designer's type size into a choice between microtype and a wall of words
+    (iter101: universal's wide box improved at 42pt, mono's closing became three
+    lines of 61pt).
+
+    The fix this points at is the TITLE BUDGET, per template, taken from the
+    designer's own headings — not another rule about sizes.
+    """
+    if not source_path:
+        return None
+
+    def _median_len(path):
+        lengths = []
+        for slide in Presentation(path).slides:
+            title = _pick_title_shape(slide, set())
+            if title is None or not title.has_text_frame:
+                continue
+            text = " ".join(title.text_frame.text.split())
+            if text:
+                lengths.append(len(text))
+        return round(statistics.median(lengths)) if lengths else None
+
+    ours, theirs = _median_len(deck_path), _median_len(source_path)
+    if ours is None or theirs is None:
+        return None
+    return ours, theirs
+
+
 def _median_title_gap_pct(path):
     """Median gap between a slide's title and the content under it, as a share
     of the slide height. None when no slide offers two content boxes."""
@@ -726,6 +760,7 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
         "title_gap": title_gap_vs_template(deck, src),
         "title_ink": title_ink_cut_by_its_box(deck, renders, plan),
         "title_sizes": title_sizes(deck, src, plan),
+        "title_len": title_length_vs_template(deck, src),
         "weak": weak,
         "unmeasured": [i + 1 for i, n in
                        enumerate(result["contrast"].get("unmeasured_boxes") or []) if n],
@@ -782,6 +817,8 @@ def main():
                  if r.get("slots") else "")
               + (f"  зазор под титулом {r['title_gap'][0]}% против {r['title_gap'][1]}% у шаблона"
                  if r.get("title_gap") else "")
+              + (f"  заголовки {r['title_len'][0]} знаков против {r['title_len'][1]} у шаблона"
+                 if r.get("title_len") and r["title_len"][0] > r["title_len"][1] * 1.4 else "")
               + (("  кегли титулов вразнобой: мода {}pt, но ".format(int(r["title_sizes"][1]))
                   + "; ".join(f"слайд {n} {int(ours)}pt"
                               + (f" (у шаблона там {int(theirs)}pt)" if theirs else " (синтез)")
