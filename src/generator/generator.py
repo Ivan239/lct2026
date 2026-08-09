@@ -1194,7 +1194,10 @@ def _stats_title_shape(slide, claimed_ids):
     candidates = [s for s in _content_text_shapes(slide, claimed_ids) if s.top is not None]
     if not candidates:
         return _pick_title_shape(slide, claimed_ids)
-    return min(candidates, key=lambda s: s.top)
+    topmost = min(candidates, key=lambda s: s.top)
+    if _is_display_figure(topmost):
+        return None
+    return topmost
 
 
 # A display figure's caption reads as a caption at about a third of it; below

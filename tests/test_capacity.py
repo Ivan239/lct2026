@@ -100,8 +100,12 @@ def test_a_one_big_number_stats_slide_has_capacity_one():
 
     universal = list(Presentation(TJ_UNIVERSAL).slides)
     assert get_capacity(universal[9], "stats_kpi") == 4, "the KPI board must be untouched"
-    assert get_capacity(universal[8], "stats_kpi") is None, (
-        "an unsized body must keep the conservative answer, not a guessed 1")
+    # iter87: this slide holds one PAIR — a 92pt figure and a caption — and
+    # says so structurally, from two boxes, not from a guess about sizes. It
+    # used to answer None only because the topmost box (the figure itself) was
+    # claimed as the title, leaving a single box behind; that claim is what put
+    # a heading across the artwork, and it is gone.
+    assert get_capacity(universal[8], "stats_kpi") == 1
 
 
 @requires(TJ_TEMPLATE)
