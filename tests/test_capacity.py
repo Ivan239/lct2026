@@ -124,12 +124,38 @@ def test_a_one_big_number_slide_sets_number_and_label_apart(tmp_path):
              out)
 
     slide = list(Presentation(out).slides)[0]
-    body = [s for s in slide.shapes if s.has_text_frame and "-40%" in s.text_frame.text]
-    assert body, "the stat vanished"
-    paragraphs = [p for p in body[0].text_frame.paragraphs
-                  if "".join(r.text for r in p.runs).strip()]
-    assert len(paragraphs) == 2, f"number and label must be separate: {len(paragraphs)}"
+    figure = next((s for s in slide.shapes
+                   if s.has_text_frame and "-40%" in s.text_frame.text), None)
+    assert figure is not None, "the stat vanished"
 
-    sizes = [max(r.font.size.pt for r in p.runs if r.font.size) for p in paragraphs]
-    assert sizes[0] > sizes[1], f"the figure is not the bigger of the two: {sizes}"
-    assert min(sizes) >= 9, f"shrunk into microtext: {sizes}"
+    # Asserted on the OUTCOME, not on the mechanism: iter70 moved the label out
+    # of the figure's box into the empty strip the card leaves beneath it, so
+    # "two paragraphs of one shape" is no longer the shape of the answer. What
+    # must hold either way is that the figure reads as a figure — displayed
+    # large, with a distinctly smaller label somewhere below it, neither of them
+    # microtype.
+    def _paragraph_pt(shape, needle):
+        """The size of the paragraph carrying `needle` — per paragraph, because
+        the two may still share one box, where a max over the whole shape would
+        report the figure's size for both and compare 24pt against 24pt."""
+        for para in shape.text_frame.paragraphs:
+            text = "".join(r.text for r in para.runs)
+            if needle in text:
+                sizes = [r.font.size.pt for r in para.runs if r.font.size and r.text.strip()]
+                if sizes:
+                    return max(sizes)
+        return None
+
+    label_shape = next(
+        (s for s in slide.shapes
+         if s.has_text_frame and "времени на подготовку" in s.text_frame.text), None)
+    assert label_shape is not None, "the label vanished"
+
+    figure_pt = _paragraph_pt(figure, "-40%")
+    label_pt = _paragraph_pt(label_shape, "времени на подготовку")
+    assert figure_pt and label_pt
+    assert figure_pt > label_pt * 1.5, (
+        f"the figure does not read as a figure: {figure_pt}pt over {label_pt}pt")
+    assert label_pt >= 9, f"label shrunk into microtext: {label_pt}pt"
+    if label_shape.shape_id != figure.shape_id:
+        assert int(label_shape.top) >= int(figure.top), "the label must sit below the figure"

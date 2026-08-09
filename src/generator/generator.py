@@ -14,6 +14,7 @@ from generator.deck_style import apply_observed_style, observe_deck_style
 from generator.layout_bounds import infer_content_bounds
 from generator.synthesizer import SYNTHESIZERS
 from generator.text_fit import (
+    estimate_wrapped_lines,
     cap_size_to_longest_word,
     soft_hyphenate_long_words,
     estimate_block_height_in,
@@ -1071,7 +1072,34 @@ def _stats_title_shape(slide, claimed_ids):
 _DISPLAY_LABEL_RATIO = 0.33
 
 
-def _fill_display_stat(shape, pair, claimed_ids, resolver=None):
+_DISPLAY_LABEL_MIN_STRIP_IN = 0.22
+
+
+def _free_strip_below(slide, shape):
+    """Height of the empty band under `shape`, in EMU, or 0.
+
+    The band ends at the nearest shape that overlaps this one horizontally —
+    on the T-Zh study stat slide that is the card's rule at 5.00in, leaving
+    0.41in under a box ending at 4.59in."""
+    if shape.top is None or not shape.height:
+        return 0
+    bottom = int(shape.top + shape.height)
+    left, right = int(shape.left), int(shape.left + shape.width)
+    limit = int(_slide_height(slide))
+    for other in slide.shapes:
+        if other.shape_id == shape.shape_id:
+            continue
+        if other.top is None or other.left is None or not other.width:
+            continue
+        if int(other.left) >= right or int(other.left + (other.width or 0)) <= left:
+            continue
+        top = int(other.top)
+        if bottom <= top < limit:
+            limit = top
+    return max(0, limit - bottom)
+
+
+def _fill_display_stat(shape, pair, claimed_ids, resolver=None, slide=None):
     """Number big, label under it — the treatment a one-big-number slide has."""
     number, label = str(pair[0]), str(pair[1])
     reference = _dominant_reference_run(shape) or _reference_run(shape)
@@ -1090,6 +1118,63 @@ def _fill_display_stat(shape, pair, claimed_ids, resolver=None):
     width_in = Emu(shape.width).inches
     margins = horizontal_margins_in(shape)
     spacing = _shape_line_spacing(shape)
+
+    # The designer's box holds the figure ALONE: on the T-Zh study stat slide it
+    # is 1.38in tall and one line of its own 82pt is 1.37in. Adding the label as
+    # a second paragraph therefore forced the fit down to 24pt over 18pt — a
+    # bold word in a sentence, not a KPI. If the template left an empty strip
+    # under that box (0.41in there, down to the card's rule), the label goes in
+    # the strip and the figure keeps the size the template set.
+    strip = _free_strip_below(slide, shape) if slide is not None else 0
+    number_in = estimate_block_height_in([number], width_in, number_pt, metrics=metrics,
+                                         line_spacing=spacing, margins_in=margins)
+    # The label is FITTED to the strip, not held at a ratio of the figure: a
+    # third of 82pt is 27pt, which wraps to two lines and needs 0.9in against
+    # the 0.41in the card leaves. Shrink until it fits; if even the readable
+    # floor will not, the old in-box pair stands.
+    strip_in = Emu(strip).inches
+    label_pt = max(MIN_READABLE_PT, round(number_pt * _DISPLAY_LABEL_RATIO))
+    label_in = estimate_block_height_in([label], width_in, label_pt, metrics=metrics,
+                                        line_spacing=spacing, margins_in=margins)
+    while label_pt > MIN_READABLE_PT and label_in > strip_in:
+        label_pt -= 1
+        label_in = estimate_block_height_in([label], width_in, label_pt, metrics=metrics,
+                                            line_spacing=spacing, margins_in=margins)
+    # The gate is ONE LINE, not a height comparison. Our own model says the
+    # designer's 82pt line needs 1.64in in its 1.38in box (spacing 1.2 counts
+    # 1.2 x size x percent, CLAUDE.md), i.e. the template "overflows" itself —
+    # measuring the figure against the box would refuse the very layout the
+    # template ships. What actually matters is that the figure stays a single
+    # line, exactly as the designer set it.
+    number_lines = estimate_wrapped_lines(number, width_in, number_pt,
+                                          metrics=metrics, margins_in=margins)
+    if (number_lines <= 1
+            and Emu(strip).inches >= max(_DISPLAY_LABEL_MIN_STRIP_IN, label_in)):
+        _set_run_text(shape, number, claimed_ids, resolver=resolver)
+        for para in shape.text_frame.paragraphs:
+            for run in para.runs:
+                run.font.size = Pt(number_pt)
+                run.font.bold = True
+        caption = slide.shapes.add_textbox(
+            Emu(int(shape.left)), Emu(int(shape.top + shape.height)),
+            Emu(int(shape.width)), Emu(int(Inches(label_in))))
+        caption.text_frame.word_wrap = True
+        # Same insets as the figure's box, or the caption starts 0.1in to its
+        # right (the default inset of a fresh textbox) and the two no longer
+        # share a left edge — visible on the render.
+        caption.text_frame.margin_left = shape.text_frame.margin_left
+        caption.text_frame.margin_right = shape.text_frame.margin_right
+        caption.text_frame.margin_top = 0
+        caption.text_frame.text = label
+        run = caption.text_frame.paragraphs[0].runs[0]
+        reference_run = _reference_run(shape)
+        if reference_run is not None:
+            _copy_run_format(reference_run, run)
+        run.font.size = Pt(label_pt)
+        run.font.bold = False
+        claimed_ids.add(caption.shape_id)
+        return
+
     while number_pt > MIN_READABLE_PT:
         label_pt = max(MIN_READABLE_PT, round(number_pt * _DISPLAY_LABEL_RATIO))
         est = (estimate_block_height_in([number], width_in, number_pt, metrics=metrics,
@@ -1172,7 +1257,8 @@ def _fill_stats_kpi(slide, data, claimed_ids, resolver=None):
             # headline sentence where the template shows «20 227 000» alone at
             # 82pt. Number at the box's own display size, label under it at a
             # third of it — the fitters shrink from there if it does not fit.
-            _fill_display_stat(boxes[0], stats[0], claimed_ids, resolver=resolver)
+            _fill_display_stat(boxes[0], stats[0], claimed_ids, resolver=resolver,
+                               slide=slide)
             return
         lines = [f"{num} — {label}" for num, label in stats]
         font_size_pt = _set_paragraph_texts(
