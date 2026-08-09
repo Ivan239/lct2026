@@ -459,8 +459,11 @@ def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None)
     return slide, len(prs.slides) - 1, palette, bounds
 
 
-def _metrics_for(resolver, font_name):
-    return resolver.metrics_for(font_name) if resolver is not None else None
+def _metrics_for(resolver, font_name, bold=False):
+    """bold matters: titles here are drawn bold, and the bold face is 7-8% wider
+    on Cyrillic — measuring them regular predicted one line where the renderer
+    drew two (fonts/metrics._SYSTEM_DONOR_BOLD_CANDIDATES)."""
+    return resolver.metrics_for(font_name, bold=bold) if resolver is not None else None
 
 
 # A cloned canvas keeps its decorative art, and small pieces of it sit inside the
@@ -543,7 +546,7 @@ def _add_title(slide, bounds, text, font_name, color_hex, size_pt=None, resolver
     content below it is positioned after wherever the title really ends."""
     size_pt = size_pt or DEFAULT_TITLE_PT
     width = Emu(bounds["right"] - bounds["left"])
-    metrics = _metrics_for(resolver, font_name)
+    metrics = _metrics_for(resolver, font_name, bold=True)  # drawn bold below
     # Height-only fitting accepts a size at which a long word has no choice but
     # to break mid-letter — "Конкурентоспособность" came out split at 32pt on two
     # real templates. iter18 capped the comparison columns for exactly this; the
@@ -616,7 +619,7 @@ def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None
     # The template's own cover size, capped so a long title cannot be broken
     # mid-word: at the 92pt these survey decks use, an uncapped base would do
     # exactly what iter18/iter25 caught on content titles.
-    metrics = _metrics_for(resolver, t["major_font"])
+    metrics = _metrics_for(resolver, t["major_font"], bold=True)  # drawn bold below
     cover_pt = cap_size_to_longest_word(
         title_text, title_width, t.get("cover_pt") or DEFAULT_COVER_PT,
         metrics=metrics, bold=True)
@@ -757,7 +760,7 @@ def synthesize_two_column_comparison(prs, theme, bounds_in, data, resolver=None,
     col_width = Emu((total_width - margin) // 2)
 
     col_width_in = Emu(col_width).inches
-    major_metrics = _metrics_for(resolver, t["major_font"])
+    major_metrics = _metrics_for(resolver, t["major_font"], bold=True)  # headings are bold
     minor_metrics = _metrics_for(resolver, t["minor_font"])
 
     # A column is half the content width, and on a canvas whose bounds exclude a
@@ -847,7 +850,7 @@ def synthesize_image_caption(prs, theme, bounds_in, data, resolver=None, canvas_
     # of dead band between the heading and the frame — visible on the render as
     # a hole under the title. Where a wrap is impossible with 10% to spare,
     # reserve exactly the title.
-    metrics = _metrics_for(resolver, t["major_font"])
+    metrics = _metrics_for(resolver, t["major_font"], bold=True)  # drawn bold below
     fitted_pt = cap_size_to_longest_word(
         data.get("title", ""), Emu(b["right"] - b["left"]),
         t.get("title_pt") or DEFAULT_TITLE_PT, metrics=metrics, bold=True)

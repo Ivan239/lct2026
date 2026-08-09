@@ -31,6 +31,20 @@ _REQUIRED_TABLES = ("cmap", "hmtx", "head", "hhea")
 # Metric donors for when the pptx has no usable embedded font. Ordered; first
 # parseable wins. These are Helvetica/Arial-class faces — not exact for every
 # brand font, but far closer than a flat per-character constant.
+# The BOLD donor matters as much as the regular one: our titles are drawn bold
+# (synthesizer._style_paragraph passes bold=True) and Cyrillic bold runs 7-8%
+# wider than the regular face — measured on Arial at 40pt: «Что мешало собирать
+# отчётность вовремя» is 796pt regular and 858pt bold, against a title box
+# budget of 853pt. The regular measurement promised one line and the render drew
+# two, which is invisible while a layout keeps slack under the title and lands
+# the body on top of it as soon as one does not.
+_SYSTEM_DONOR_BOLD_CANDIDATES = (
+    "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+    "/Library/Fonts/Arial Bold.ttf",
+    "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+)
+
 _SYSTEM_DONOR_CANDIDATES = (
     "/System/Library/Fonts/Supplemental/Arial.ttf",
     "/Library/Fonts/Arial.ttf",
@@ -158,8 +172,10 @@ def _embedded_fonts(pptx_path):
 
 
 @lru_cache(maxsize=1)
-def _system_donor():
-    for path in _SYSTEM_DONOR_CANDIDATES:
+def _system_donor(bold=False):
+    candidates = (_SYSTEM_DONOR_BOLD_CANDIDATES + _SYSTEM_DONOR_CANDIDATES
+                  if bold else _SYSTEM_DONOR_CANDIDATES)
+    for path in candidates:
         for font_number in (0, None):
             try:
                 kwargs = {"lazy": True}
@@ -174,22 +190,35 @@ def _system_donor():
     return None
 
 
-def get_font_metrics(pptx_path, font_name):
-    """FontMetrics for font_name via embedded → system donor → None."""
+def get_font_metrics(pptx_path, font_name, bold=False):
+    """FontMetrics for font_name via embedded → system donor → None.
+
+    `bold` picks the bold face where one is available. None of the five real
+    templates embeds a font, so in practice this is the difference between the
+    regular and the bold donor — and that difference is 7-8% of the width on
+    Cyrillic, enough to turn a predicted one-line title into a drawn two-line
+    one."""
     wanted = _normalize(font_name)
     embedded = _embedded_fonts(pptx_path)
     if wanted:
-        for family, metrics in embedded:
-            got = _normalize(family)
-            if got and (got == wanted or got.startswith(wanted) or wanted.startswith(got)):
-                return metrics
+        matches = [(family, metrics) for family, metrics in embedded
+                   if _normalize(family)
+                   and (_normalize(family) == wanted
+                        or _normalize(family).startswith(wanted)
+                        or wanted.startswith(_normalize(family)))]
+        if matches:
+            if bold:
+                for family, metrics in matches:
+                    if "bold" in (family or "").lower():
+                        return metrics
+            return matches[0][1]
     # A deck usually embeds exactly its brand family — if there's precisely one
     # embedded family, it's a better metric source for any requested name than
     # a generic donor.
     families = {f for f, _ in embedded if f}
     if len(families) == 1 and embedded:
         return embedded[0][1]
-    return _system_donor()
+    return _system_donor(bold=bold)
 
 
 class FontResolver:
@@ -209,9 +238,9 @@ class FontResolver:
             return self.theme_fonts.get("majorFont") or font_name
         return font_name
 
-    def metrics_for(self, font_name):
+    def metrics_for(self, font_name, bold=False):
         name = self.resolve_name(font_name)
-        key = name or "__default__"
+        key = (name or "__default__", bool(bold))
         if key not in self._cache:
-            self._cache[key] = get_font_metrics(self.pptx_path, name)
+            self._cache[key] = get_font_metrics(self.pptx_path, name, bold=bold)
         return self._cache[key]
