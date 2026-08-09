@@ -71,3 +71,38 @@ def test_the_header_of_a_generated_deck_shows_the_ellipsis(tmp_path):
     header = [t for t in texts if t.strip().isupper() and t.strip()]
     assert header, f"no running header found in {texts}"
     assert any(ELLIPSIS in t for t in header), header
+
+
+@requires(TJ_TEMPLATE)
+def test_the_header_fits_its_box_on_one_line(tmp_path):
+    """A character cap fits nothing in particular.
+
+    The T-Zh header slot is 1.85x0.12in — one line of 8pt — and holds the
+    designer's «ТЕМА ПРЕЗЕНТАЦИИ» at 84pt of its 133pt budget. Our 42-character
+    cut measured 195pt: the header wrapped to two lines and the second hung
+    below the chrome band, on every slide of every deck. The budget is the box.
+    """
+    from pptx.util import Emu
+
+    from fonts.metrics import FontResolver
+    from generator.text_fit import _usable_width_in, horizontal_margins_in
+    from template_parser.parser import extract_theme
+
+    out = str(tmp_path / "deck.pptx")
+    generate(TJ_TEMPLATE, [({"type": "title", "title": LONG, "subtitle": "Итоги"}, 0)], out)
+    resolver = FontResolver(out, extract_theme(out))
+    checked = 0
+    for shape in list(Presentation(out).slides)[0].shapes:
+        if not shape.has_text_frame:
+            continue
+        text = shape.text_frame.text.strip()
+        if ELLIPSIS not in text:
+            continue
+        run = shape.text_frame.paragraphs[0].runs[0]
+        metrics = resolver.metrics_for(run.font.name)
+        budget = _usable_width_in(
+            Emu(shape.width).inches, horizontal_margins_in(shape)) * 72
+        width = metrics.text_width_pt(text, run.font.size.pt)
+        assert width <= budget, f"{text!r} draws {width:.0f}pt in a {budget:.0f}pt box"
+        checked += 1
+    assert checked, "the shortened running header was not found on the deck"

@@ -15,6 +15,8 @@ from generator.deck_style import apply_observed_style, observe_deck_style
 from generator.layout_bounds import infer_content_bounds
 from generator.synthesizer import SYNTHESIZERS
 from generator.text_fit import (
+    SINGLE_LINE_SAFETY,
+    _usable_width_in,
     estimate_wrapped_lines,
     cap_size_to_longest_word,
     soft_hyphenate_long_words,
@@ -1671,7 +1673,7 @@ MAX_RUNNING_HEADER_CHARS = 42
 RUNNING_TOPIC_ELLIPSIS = "…"
 
 
-def _shorten_running_topic(title):
+def _shorten_running_topic(title, shape=None, run=None, resolver=None, cased=None):
     """The deck's topic, cut to the header slot — and marked as cut.
 
     Trimming at a word boundary alone ships a phrase that LOOKS whole and is
@@ -1682,16 +1684,61 @@ def _shorten_running_topic(title):
 
     So: drop a trailing function word the way iter56 does for bullets — a header
     must not end on a preposition either — and add an ellipsis, which is what
-    tells the reader the topic is shortened rather than mangled."""
+    tells the reader the topic is shortened rather than mangled.
+
+    The budget is the BOX, not a character count, when the box can be measured.
+    42 characters is a guess that fits nothing in particular: the T-Zh header
+    slot is 1.85x0.12in — one line of 8pt — and holds «ТЕМА ПРЕЗЕНТАЦИИ» at
+    84pt of its 133pt budget, while our 42-character topic measures 195pt and
+    wrapped to two lines in a one-line box, on every slide of every deck. The
+    character cap stays as the fallback for a box we cannot measure.
+
+    `cased` is the transform the caller will apply before writing (these slots
+    are set in caps on purpose): the width has to be measured on the string the
+    renderer will actually draw, since Cyrillic capitals are the wider ones."""
+    fitted = _fit_topic_to_box(title, shape, run, resolver, cased)
+    if fitted is not None:
+        return fitted
     if len(title) <= MAX_RUNNING_HEADER_CHARS:
         return title
-    budget = MAX_RUNNING_HEADER_CHARS - len(RUNNING_TOPIC_ELLIPSIS)
+    return _cut_topic(title, MAX_RUNNING_HEADER_CHARS)
+
+
+def _cut_topic(title, max_chars):
+    budget = max_chars - len(RUNNING_TOPIC_ELLIPSIS)
     head = title[:budget + 1]
     if " " not in head:
         return title  # one very long word: _fits_box_width decides its fate
     cut = head.rsplit(" ", 1)[0].rstrip(".,;:—- ")
     cut = drop_dangling_function_words(cut) or cut
     return cut + RUNNING_TOPIC_ELLIPSIS
+
+
+def _fit_topic_to_box(title, shape, run, resolver, cased=None):
+    """`title` shortened to one line of its box, or None when unmeasurable."""
+    if shape is None or run is None or resolver is None or not shape.width:
+        return None
+    metrics = resolver.metrics_for(run.font.name) if run.font.name else None
+    size_pt = run.font.size.pt if run.font.size else None
+    if metrics is None or not size_pt:
+        return None
+    as_drawn = cased or (lambda text: text)
+    budget_pt = _usable_width_in(
+        Emu(shape.width).inches, horizontal_margins_in(shape)) * 72 * SINGLE_LINE_SAFETY
+    if budget_pt <= 0:
+        return None
+    if metrics.text_width_pt(as_drawn(title), size_pt) <= budget_pt:
+        return title
+
+    words = title.split()
+    for count in range(len(words) - 1, 0, -1):
+        cut = drop_dangling_function_words(" ".join(words[:count]).rstrip(".,;:—- "))
+        if not cut:
+            continue
+        candidate = cut + RUNNING_TOPIC_ELLIPSIS
+        if metrics.text_width_pt(as_drawn(candidate), size_pt) <= budget_pt:
+            return candidate
+    return title  # even one word does not fit: _fits_box_width keeps the template's
 
 
 def _fill_running_topic(prs, deck_title, resolver=None):
@@ -1714,8 +1761,10 @@ def _fill_running_topic(prs, deck_title, resolver=None):
             original = runs[0].text.strip()
             if original.lower() not in TOPIC_SLOT_PROMPTS:
                 continue
-            topic = _shorten_running_topic(deck_title.strip())
-            topic = topic.upper() if original.isupper() else topic
+            cased = str.upper if original.isupper() else None
+            topic = _shorten_running_topic(
+                deck_title.strip(), shape, runs[0], resolver, cased)
+            topic = cased(topic) if cased else topic
             # Trimming by character count is not enough: a header box is small
             # and one long word can still be wider than it, which the renderer
             # then breaks mid-letter ("ВЫСОКОПРОИЗВОДИТЕЛЬНАЯ" in a 128pt-wide
