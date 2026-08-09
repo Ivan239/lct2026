@@ -350,30 +350,46 @@ def test_content_starts_past_a_decor_strip_running_down_the_edge():
     alone. And the edge test needs a tolerance, not equality — these blobs
     alternate between 0.4507in and 0.4537in, and a strict "starts at or before
     the band's left edge" dropped four of the seven, taking coverage to 31% and
-    silently disabling the check."""
-    from pptx.util import Emu
+    silently disabling the check.
 
-    from generator.deck_style import apply_observed_style, observe_deck_style
-    from generator.layout_bounds import infer_content_bounds
-    from generator.synthesizer import _prepare_blank_slide
-    from template_parser.parser import extract_template, extract_theme
+    The survey blobs no longer reach this rule: iter58 established they are
+    bullet MARKERS, not artwork, and drops them with the text they marked — the
+    better answer than starting content to their right. Measured then: those four
+    canvases (survey-31 24/26, survey-69 62/64) were the rule's only live cases
+    in the whole corpus. The rule itself stands for a real side-decor column, so
+    it is exercised here on a constructed one rather than deleted: a template
+    that pins art down one edge is an obvious thing to meet next, and this keeps
+    the calibration (merged span, edge tolerance) from being lost."""
+    import base64
+    import io
 
-    prs = Presentation(SURVEY_31)
-    theme = apply_observed_style(extract_theme(SURVEY_31), observe_deck_style(prs))
-    bounds_in = infer_content_bounds(extract_template(SURVEY_31))
+    from pptx.util import Emu, Inches
 
-    slide, _, _, bounds = _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=24)
-    strip = [s for s in slide.shapes if "PICTURE" in str(s.shape_type)]
-    assert len(strip) >= 5, "fixture: this canvas is supposed to carry a decor column"
-    strip_right = max(int(s.left + s.width) for s in strip)
-    assert int(bounds["left"]) >= strip_right, (
-        f"content starts at {Emu(bounds['left']).inches:.2f}in, inside a decor strip "
+    from generator.synthesizer import _clip_to_side_decor
+
+    # A 1x1 PNG is enough — the rule reads geometry, never pixels.
+    png = base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4//8/AAX+Av4N70a4AAAAAElFTkSuQmCC")
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Emu(Inches(13.33)), Emu(Inches(7.5))
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    # An art column down the left edge: seven blocks whose left edges alternate
+    # by 0.003in, exactly as the survey blobs did — the case that showed a strict
+    # edge equality silently disables the rule.
+    art = [slide.shapes.add_picture(io.BytesIO(png),
+                                    Emu(Inches(0.45 + (i % 2) * 0.003)),
+                                    Emu(Inches(1.0 + i * 0.8)),
+                                    Emu(Inches(0.7)), Emu(Inches(0.6)))
+           for i in range(7)]
+    band = {"left": Emu(Inches(0.45)), "top": Emu(Inches(1.0)),
+            "right": Emu(Inches(12.0)), "bottom": Emu(Inches(6.6))}
+
+    clipped = _clip_to_side_decor(band, slide, prs.slide_width, prs.slide_height)
+    strip_right = max(int(s.left + s.width) for s in art)
+    assert int(clipped["left"]) >= strip_right, (
+        f"content starts at {Emu(clipped['left']).inches:.2f}in, inside a decor strip "
         f"ending at {Emu(strip_right).inches:.2f}in")
-
-    # A canvas without a side strip keeps its full width.
-    prs2 = Presentation(SURVEY_31)
-    _, _, _, plain = _prepare_blank_slide(prs2, theme, bounds_in, canvas_idx=29)
-    assert int(plain["left"]) <= int(bounds["left"]), "unrelated canvas lost width"
+    assert int(clipped["right"]) == int(band["right"]), "the clear side must not move"
 
 
 @requires(TJ)

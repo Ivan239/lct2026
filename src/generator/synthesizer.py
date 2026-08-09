@@ -322,6 +322,60 @@ def _blank_ownerless_chrome(slide, slide_height):
                 run.text = ""
 
 
+_MARKER_MAX_SIZE = Inches(1.0)
+_MARKER_ALIGN_TOL = Inches(0.06)
+
+
+def _drop_orphaned_marker_column(slide, placed):
+    """Delete the canvas's bullet-marker icons once the text they marked is gone.
+
+    Decks that draw bullets as little pictures leave those pictures behind when
+    the clone path strips the canvas's own text boxes: they are independent
+    shapes, so nothing removes them. The survey template's synthesized list
+    shipped a column of SEVEN stranded blobs down the left margin while the
+    three real bullets sat below with their own «•» — the icons read as bullets
+    whose text had vanished.
+
+    The native fill path has handled this since iter18 (_reposition_bullet_icons
+    deletes every icon past the last line); the clone path never got the same
+    pass. Same divergence CLAUDE.md records for the chrome blanking above.
+
+    Deliberately narrow, because a picture on a canvas is usually decor worth
+    keeping. A column is three or more pictures under an inch wide, matching in
+    size, sharing a left edge, standing to the left of the removed text and
+    overlapping it vertically — i.e. markers for text that no longer exists.
+    Measured over every real template: it fires only on the two survey decks
+    (whose lists really are icon-marked, verified on the template's own render)
+    and never on the three T-Zh decks, whose decor is single shapes and photos."""
+    if not placed:
+        return []
+    small = [s for s in slide.shapes
+             if "PICTURE" in str(s.shape_type)
+             and s.left is not None and s.top is not None and s.width and s.height
+             and s.width < _MARKER_MAX_SIZE]
+    # Ownership is per text box, not against the union of them: the canvas's
+    # TITLE is typically further left than the body its markers belong to
+    # (survey slide 25 — title at 0.45in, body at 1.11in, icons ending at
+    # 1.15in), and measuring against the union asks the markers to stand left
+    # of the title, which they never do.
+    pics = [q for q in small
+            if any(q.left + q.width <= t.left + _MARKER_ALIGN_TOL
+                   and q.top < t.top + t.height and q.top + q.height > t.top
+                   for t in placed)]
+
+    dropped = []
+    for i, ref in enumerate(pics):
+        column = [q for q in pics[i:]
+                  if abs(q.left - ref.left) < _MARKER_ALIGN_TOL
+                  and abs(q.width - ref.width) < _MARKER_ALIGN_TOL
+                  and abs(q.height - ref.height) < _MARKER_ALIGN_TOL]
+        if len(column) >= 3 and not any(q in dropped for q in column):
+            dropped.extend(column)
+    for shape in dropped:
+        shape._element.getparent().remove(shape._element)
+    return dropped
+
+
 def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None):
     """Adds a new slide (appended at the end of prs.slides) and returns
     (slide, index, palette, bounds).
@@ -343,6 +397,11 @@ def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None)
                                       canvas_bg if canvas_bg is not None else _slide_bg_hex(slide))
         removed = content_text_shapes(slide)
         placed = [s for s in removed if s.left is not None and s.top is not None and s.width and s.height]
+        # Before any geometry is measured: a marker column is not decor to keep
+        # clear of, it is debris of the text being stripped. Dropping it later
+        # would leave _clip_to_side_decor pushing content right, away from
+        # pictures that no longer exist.
+        _drop_orphaned_marker_column(slide, placed)
         bounds = None
         if placed:
             bounds = {
