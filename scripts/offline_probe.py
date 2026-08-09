@@ -36,6 +36,7 @@ import glob
 import json
 import os
 import shutil
+import statistics
 import subprocess
 import sys
 
@@ -434,6 +435,55 @@ def canvas_slots_used(deck_path, source_path, plan):
     return worst if worst and worst[0] < worst[1] else None
 
 
+def _median_title_gap_pct(path):
+    """Median gap between a slide's title and the content under it, as a share
+    of the slide height. None when no slide offers two content boxes."""
+    prs = Presentation(path)
+    height = prs.slide_height
+    gaps = []
+    for slide in prs.slides:
+        boxes = []
+        for shape in slide.shapes:
+            if not shape.has_text_frame or not shape.text_frame.text.strip():
+                continue
+            if shape.top is None or shape.height is None:
+                continue
+            if is_chrome_shape(shape, height):
+                continue
+            boxes.append((int(shape.top), int(shape.top) + int(shape.height)))
+        if len(boxes) < 2:
+            continue
+        boxes.sort()
+        gaps.append((boxes[1][0] - boxes[0][1]) / height * 100)
+    return round(statistics.median(gaps)) if gaps else None
+
+
+def title_gap_vs_template(deck_path, source_path):
+    """(ours, template's) median title-to-content gap, in percent of the slide.
+
+    An OPEN question, printed rather than decided. Synthesized slides centre
+    their block in the band that is left, which on short content opens a hole:
+    ours run 24-30% of the slide height on survey-31 where the template's own
+    slides run 0-8%. Медианы of the five real templates are 0 / 1 / 4 / 4 / 20
+    percent — so "hug the title" would be as flat a rule as "always centre",
+    and mono genuinely does hold its content low.
+
+    Capping the drop at the template's own gap was tried (iter95) and reverted:
+    it contradicts test_synth_center, which records the opposite decision made
+    on a real deck — a comparison glued to the title with the lower half of the
+    slide empty. Both are true at once, and that is the point of printing the
+    two numbers: the designer's content is BOTH glued to the title and dense,
+    while ours is sparse, so neither rule alone settles it.
+    """
+    if not source_path:
+        return None
+    ours = _median_title_gap_pct(deck_path)
+    theirs = _median_title_gap_pct(source_path)
+    if ours is None or theirs is None:
+        return None
+    return ours, theirs
+
+
 def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
     src = os.path.join(TEMPLATES, f"{template_id}.pptx")
     archetypes, pngs = _cached_parse(template_id)
@@ -498,6 +548,7 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
         "parse": f"{classified}/{len(archetypes)}",
         "over_at_wrap": boxes_over_at_render_wrap(deck, src, plan),
         "slots": canvas_slots_used(deck, src, plan),
+        "title_gap": title_gap_vs_template(deck, src),
         "weak": weak,
         "unmeasured": [i + 1 for i, n in
                        enumerate(result["contrast"].get("unmeasured_boxes") or []) if n],
@@ -552,6 +603,8 @@ def main():
                  if r.get("over_at_wrap") else "")
               + (f"  слотов канвы {r['slots'][0]}/{r['slots'][1]} (слайд {r['slots'][2]})"
                  if r.get("slots") else "")
+              + (f"  зазор под титулом {r['title_gap'][0]}% против {r['title_gap'][1]}% у шаблона"
+                 if r.get("title_gap") else "")
               + (f"  НЕ ПРОВЕРЕН контраст: {r['unmeasured']}"
                  + (f" ({'; '.join(r['unmeasured_why'])})" if r.get("unmeasured_why") else "")
                  if r["unmeasured"] else ""))
