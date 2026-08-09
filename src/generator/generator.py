@@ -28,7 +28,8 @@ from generator.text_fit import (
     paragraph_pitch_pt,
     vertical_insets_emu,
 )
-from qa.geometry import MIN_READABLE_PT, enforce_text_fits, harmonize_clone_font_sizes
+from qa.geometry import (MIN_READABLE_PT, enforce_text_fits, harmonize_clone_font_sizes,
+                         keep_text_clear_of_side_art)
 from qa.package_check import assert_valid_package
 from template_parser.parser import extract_template, extract_theme
 
@@ -1831,6 +1832,7 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
     # overflows — the safety net behind all the per-filler sizing above —
     # then evens out font sizes across clones of the same template slide.
     # Whatever they shrank gets its marker icons re-laid-out for the new size.
+    keep_text_clear_of_side_art(prs, resolver, slide_indices=final_order)
     shrink_fixes = enforce_text_fits(prs, resolver, slide_indices=final_order)
     harmonize_changes = harmonize_clone_font_sizes(prs, fill_groups.values())
     harmonize_changes += _harmonize_slot_sizes(prs, final_order)

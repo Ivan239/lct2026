@@ -10,9 +10,11 @@ synthesized slide's estimate drifting from a late edit, or simply a future
 filler bug. Belt and suspenders, purely local, no LLM.
 """
 
-from pptx.util import Emu, Pt
+from pptx.util import Emu, Inches, Pt
 
 from generator.text_fit import (
+    cap_size_to_longest_word,
+    estimate_wrapped_lines,
     estimate_block_height_in,
     fit_font_size,
     horizontal_margins_in,
@@ -151,6 +153,100 @@ def find_sparse_slides(prs, slide_roles):
                 "details": f"контент занимает {covered / slide_area:.0%} площади слайда",
             })
     return issues
+
+
+# A picture is a side ART PANEL — text must stay out of it — when it starts to
+# the RIGHT of a text box's left edge and covers a real share of the slide. The
+# "starts to the right" part is what separates it from a full-bleed background
+# (left edge 0), which every text box on the slide legitimately sits on: the
+# T-Zh folder cards and the survey backdrops are exactly that, and treating them
+# as obstacles would leave nowhere to put anything.
+SIDE_ART_MIN_AREA_FRACTION = 0.06
+SIDE_ART_GAP_IN = 0.2
+# Below this share of the box's own width the clear zone is a sliver: narrowing
+# to it would trade a legible overlap for an illegible column.
+SIDE_ART_MIN_CLEAR_FRACTION = 0.4
+
+
+def _side_art_left(slide, shape, slide_w, slide_h):
+    left = None
+    for art in slide.shapes:
+        if "PICTURE" not in str(art.shape_type):
+            continue
+        if art.left is None or art.top is None or not art.width or not art.height:
+            continue
+        if (art.width * art.height) < SIDE_ART_MIN_AREA_FRACTION * slide_w * slide_h:
+            continue
+        if int(art.top) >= int(shape.top + shape.height) or int(art.top + art.height) <= int(shape.top):
+            continue
+        if not int(shape.left) < int(art.left) < int(shape.left + shape.width):
+            continue
+        left = int(art.left) if left is None else min(left, int(art.left))
+    return left
+
+
+def keep_text_clear_of_side_art(prs, resolver, slide_indices=None):
+    """Narrow a text box whose text would otherwise be drawn over side artwork.
+
+    The universal template's cover box runs to 9.44in while its art panel starts
+    at 5.91in: the designer's own «Название / презентации» is short and breaks by
+    hand, so it never reaches the art, and a generated title of ordinary length
+    ran straight through the balloons with «управленческой» unreadable — on the
+    deck's first slide.
+
+    Only acts when OUR text actually reaches the panel, so a template whose own
+    text stays clear is untouched. Runs before enforce_text_fits, which then
+    re-wraps against the narrowed box. Returns the shapes it narrowed."""
+    changed = []
+    indices = range(len(prs.slides._sldIdLst)) if slide_indices is None else slide_indices
+    for slide_idx in indices:
+        slide = prs.slides[slide_idx]
+        for shape in slide.shapes:
+            if not shape.has_text_frame or not shape.width or not shape.height:
+                continue
+            if shape.left is None or shape.top is None:
+                continue
+            texts = [t for t in _shape_texts(shape) if t.strip()]
+            if not texts:
+                continue
+            art_left = _side_art_left(slide, shape, prs.slide_width, prs.slide_height)
+            if art_left is None:
+                continue
+            clear = art_left - int(Inches(SIDE_ART_GAP_IN)) - int(shape.left)
+            if clear < SIDE_ART_MIN_CLEAR_FRACTION * int(shape.width):
+                continue
+            size_pt = max((r.font.size.pt for p in shape.text_frame.paragraphs
+                           for r in p.runs if r.font.size and r.text.strip()), default=None)
+            font_name = next((r.font.name for p in shape.text_frame.paragraphs
+                              for r in p.runs if r.font.name), None)
+            metrics = resolver.metrics_for(font_name) if font_name else None
+            if not size_pt or metrics is None:
+                continue
+            margins = horizontal_margins_in(shape)
+            clear_in = Emu(clear).inches
+            reaches = any(
+                estimate_wrapped_lines(t, clear_in, size_pt, metrics=metrics,
+                                       margins_in=margins) > 1
+                for t in texts)
+            if not reaches:
+                continue
+            shape.width = Emu(clear)
+            # Re-cap to the NEW width: narrowing a box leaves the size that was
+            # fitted to the old one, and the corpus test caught exactly that —
+            # «Высокопроизводительная» at 36pt no longer fits 5.3in, so the
+            # renderer would break it mid-letter. A smaller title beats a
+            # chopped word (iter18/25); enforce_text_fits only checks height.
+            capped = cap_size_to_longest_word(
+                texts, shape.width, size_pt, metrics=metrics, margins_in=margins,
+                bold=any(r.font.bold for p in shape.text_frame.paragraphs
+                         for r in p.runs if r.font.bold))
+            if float(capped) < size_pt:
+                for para in shape.text_frame.paragraphs:
+                    for run in para.runs:
+                        if run.font.size:
+                            run.font.size = Pt(float(capped))
+            changed.append((slide_idx, shape.shape_id))
+    return changed
 
 
 def enforce_text_fits(prs, resolver, slide_indices=None):
