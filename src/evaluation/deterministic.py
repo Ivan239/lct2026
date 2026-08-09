@@ -24,7 +24,7 @@ from pptx.enum.text import MSO_ANCHOR
 from pptx.util import Emu, Inches
 
 from fonts.metrics import FontResolver
-from generator.generator import _pick_body_shape, _pick_title_shape
+from generator.generator import _is_display_figure, _pick_body_shape, _pick_title_shape
 from generator.text_fit import (
     cap_size_to_longest_word,
     estimate_block_height_in,
@@ -421,6 +421,8 @@ def evaluate(pptx_path, slide_roles=None):
                     lines.add(ln)
         all_line_sets.append(lines)
 
+        display_only = (len(content) <= 2
+                        and any(_is_display_figure(s) for s in content))
         overflow = sum(1 for s in content if _overflows(s, metrics_for))
         collide = _text_collisions(content, metrics_for)
         word_break = sum(1 for s in content if _breaks_a_word(s, metrics_for))
@@ -486,6 +488,7 @@ def evaluate(pptx_path, slide_roles=None):
         per_slide.append({
             "n_content": len(content),
             "chars": len(slide_text),
+            "display_only": display_only,
             "overflow": overflow,
             "collide": collide,
             "word_break": word_break,
@@ -620,11 +623,18 @@ def evaluate(pptx_path, slide_roles=None):
     # qa.geometry.find_sparse_slides exempts these roles. Without roles, fall back
     # to all slides. (Also: char/shape counts are now read from the SAME slides,
     # not filtered independently and zipped — that could misalign the pairs.)
-    if slide_roles:
-        content_slides = [p for i, p in enumerate(per_slide)
-                          if slide_roles.get(i) not in SPARSE_EXEMPT_ROLES]
-    else:
-        content_slides = per_slide
+    # …and a DISPLAY slide is exempt whatever its role says. A slide whose whole
+    # content is one big figure and its caption is sparse by design exactly as a
+    # divider is: the universal template's «20 227 000» layout has no heading at
+    # all. Exempting the stats_kpi ROLE would be wrong — that template's other
+    # stats slide is an eight-box KPI board — so the test is on the SLIDE.
+    # Measured across every probe deck and template: it selects the two
+    # big-number slides of the repeat deck and the template's own slide 8, and
+    # nothing else. A stats slide that does carry a heading has three content
+    # boxes and stays in.
+    content_slides = [p for i, p in enumerate(per_slide)
+                      if (not slide_roles or slide_roles.get(i) not in SPARSE_EXEMPT_ROLES)
+                      and not p["display_only"]]
     char_counts = [p["chars"] for p in content_slides if p["chars"] > 0]
     scores["dop_distribution"] = _evenness_score(char_counts, "символов контентных слайдов")
     paced = [p["chars"] + p["n_content"] * 40 for p in content_slides if p["chars"] > 0]
