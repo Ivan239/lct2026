@@ -104,7 +104,22 @@ def evaluate_deck(pptx_path, brief, slide_roles=None, render_dir=None,
     cres["declared_per_slide"] = dres["per_slide"]
     cres["declared_coverage"] = dres.get("coverage")
 
+    # Slides the boxed pass could not measure at all — its text sits on a
+    # picture, so there is no background to measure against (iter41). Silence
+    # there reads exactly like "checked and fine", which is how a harness ends
+    # up trusted where it is blind; iter21 added `coverage` to the declared pass
+    # for the same reason. Named in the detail so the blindness is visible.
+    unmeasured = [i for i, n in enumerate(cres.get("unmeasured_boxes") or []) if n]
+    blind_note = (f"; контраст НЕ ПРОВЕРЕН на слайдах {[i + 1 for i in unmeasured]} "
+                  "(текст поверх картинки — фона для замера нет)") if unmeasured else ""
+
     low = sorted(set(cres["low_contrast_slides"]) | set(dres["invisible_slides"]))
+    if not low and blind_note:
+        cur = scores.get("1.1", {})
+        scores["1.1"] = {
+            "score": cur.get("score"),
+            "detail": (cur.get("detail") or "").rstrip() + blind_note,
+        }
     if low:
         frac = len(low) / len(png_paths)
         cscore = max(1, min(5, round(5 - 4 * frac)))
@@ -114,7 +129,7 @@ def evaluate_deck(pptx_path, brief, slide_roles=None, render_dir=None,
                 "score": cscore,
                 "detail": (f"низкий контраст текст/фон на слайдах {[i + 1 for i in low]}"
                            + (f"; НЕВИДИМЫЙ текст на {[i + 1 for i in dres['invisible_slides']]}"
-                              if dres["invisible_slides"] else ""))
+                              if dres["invisible_slides"] else "") + blind_note)
                           + (f"; {scores['1.1']['detail']}" if scores.get('1.1', {}).get('detail') else ""),
             }
 

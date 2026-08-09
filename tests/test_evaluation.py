@@ -912,3 +912,48 @@ def test_orphan_check_ignores_the_title_but_still_catches_body_widows(tmp_path):
 
     with_body = evaluate(deck(True))["dop_orphans"]["detail"]
     assert with_body.startswith("1 "), f"a real body widow was missed: {with_body}"
+
+
+def test_unmeasurable_boxes_are_named_not_passed_over(tmp_path):
+    """A box on a picture gets no contrast verdict (iter41) — correctly, since
+    there is no background to measure against. But silence about it reads
+    exactly like "checked and fine", which is how a harness ends up trusted
+    where it is blind. iter21 added `coverage` to the declared pass for the same
+    reason; per-SLIDE coverage is too coarse here, because a slide whose columns
+    sit on photos still has measurable chrome and so looks fully covered.
+
+    Measured on the corpus: every text box of all five decks is measurable, so
+    "some box could not be measured" is a clean signal rather than noise."""
+    from PIL import Image, ImageDraw
+    from pptx import Presentation
+    from pptx.util import Inches, Pt
+
+    from evaluation.contrast import evaluate_boxed_contrast
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = Inches(10), Inches(5.63)
+    slide = prs.slides.add_slide(prs.slide_layouts[6])
+    for n, top in enumerate((1.0, 3.0)):
+        box = slide.shapes.add_textbox(Inches(1), Inches(top), Inches(4), Inches(1))
+        box.text_frame.text = f"Пункт {n}"
+        box.text_frame.paragraphs[0].runs[0].font.size = Pt(18)
+    pptx = str(tmp_path / "mixed.pptx")
+    prs.save(pptx)
+
+    img = Image.new("RGB", (1000, 563), (255, 255, 255))
+    draw = ImageDraw.Draw(img)
+    # Flat card under the first box; a "photo" (no dominant shade) under the
+    # second, built the same way as the photo fixture above.
+    draw.rectangle([80, 80, 560, 220], fill=(160, 224, 192))
+    for row in range(140):
+        shade = [(208, 128, 176), (200, 120, 168), (216, 136, 184)][row % 3]
+        draw.rectangle([80, 300 + row, 560, 301 + row], fill=shade)
+    draw.rectangle([80, 300, 560, 340], fill=(0, 0, 0))
+    draw.rectangle([100, 110, 300, 130], fill=(0, 0, 0))
+    png = str(tmp_path / "mixed-1.png")
+    img.save(png)
+
+    res = evaluate_boxed_contrast(pptx, [png])
+    assert res["coverage"] == (1, 1), "the slide has a measurable box, so it IS covered"
+    assert res["unmeasured_boxes"] == [1], (
+        f"the photo-backed box was passed over silently: {res['unmeasured_boxes']}")

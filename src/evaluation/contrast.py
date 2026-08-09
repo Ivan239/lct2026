@@ -278,14 +278,15 @@ def evaluate_boxed_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATIO):
 
     prs = Presentation(pptx_path)
     size = (prs.slide_width, prs.slide_height)
-    per, low = [], []
+    per, low, blind = [], [], []
     for i, slide in enumerate(prs.slides):
         if i >= len(png_paths):
             per.append(None)
+            blind.append(0)
             continue
         with Image.open(png_paths[i]) as raw:
             img = raw.convert("RGB")
-            worst, flagged = None, False
+            worst, flagged, unmeasured = None, False, 0
             for shape in slide.shapes:
                 if not shape.has_text_frame or not shape.text_frame.text.strip():
                     continue
@@ -294,6 +295,10 @@ def evaluate_boxed_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATIO):
                 measured = _box_contrast(
                     _box_pixels(img, (shape.left, shape.top, shape.width, shape.height), size))
                 if measured is None:
+                    # Counted, not just skipped: a box we cannot measure is text
+                    # whose readability nobody checked, and silence about it
+                    # reads exactly like "checked and fine".
+                    unmeasured += 1
                     continue
                 ratio, ink, bg = measured
                 worst = ratio if worst is None else min(worst, ratio)
@@ -315,10 +320,12 @@ def evaluate_boxed_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATIO):
                 if ratio < threshold and _dist(ink, bg) < INVISIBLE_MAX_DISTANCE:
                     flagged = True
         per.append(worst)
+        blind.append(unmeasured)
         if flagged:
             low.append(i)
     return {
         "per_slide": per,
         "low_contrast_slides": low,
+        "unmeasured_boxes": blind,
         "coverage": (sum(1 for r in per if r is not None), len(per)),
     }
