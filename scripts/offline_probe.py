@@ -31,13 +31,17 @@ Usage:
 """
 
 import argparse
+import datetime
 import glob
 import json
 import os
 import shutil
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from pptx import Presentation  # noqa: E402
 
 from common.synthesis import SYNTHESIZE  # noqa: E402
 from content_parser.two_phase import _enforce_text_budgets, bullet_char_budget  # noqa: E402
@@ -167,7 +171,43 @@ def _cached_parse(template_id):
     return best if best is not None else (None, None)
 
 
-def probe(name, template_id, blocks, out_root, outline=OUTLINE):
+def _stamp(deck_path, content, items):
+    """Write what produced this deck into the file's own properties.
+
+    Twice now a measurement has read a deck from an older run and drawn a
+    conclusion from it: once because a skipped template kept its output (fixed
+    in iter72 by clearing the directory), and once because an --out directory
+    from an earlier session was still on disk with a preset that no longer
+    matched. Clearing helps only the directories a run actually touches; a stamp
+    travels with the file, so a reader can always ask what it is looking at.
+    """
+    try:
+        sha = subprocess.run(["git", "-C", BASE, "rev-parse", "--short", "HEAD"],
+                             capture_output=True, text=True, timeout=10).stdout.strip()
+    except Exception:
+        sha = "?"
+    prs = Presentation(deck_path)
+    prs.core_properties.comments = (
+        f"{STAMP_MARKER} content={content} items={items or 'plan'} "
+        f"at {datetime.datetime.now().isoformat(timespec='seconds')} commit={sha}"
+    )
+    prs.save(deck_path)
+
+
+STAMP_MARKER = "offline_probe"
+
+
+def describe(deck_path):
+    """The stamp, for a measurement that wants to be sure what it is reading.
+
+    Matched on the marker rather than on emptiness: python-pptx fills comments
+    with «generated using python-pptx» of its own accord, so "not empty" would
+    have called a foreign deck stamped."""
+    comments = Presentation(deck_path).core_properties.comments or ""
+    return comments if comments.startswith(STAMP_MARKER) else "(no stamp)"
+
+
+def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
     src = os.path.join(TEMPLATES, f"{template_id}.pptx")
     archetypes, pngs = _cached_parse(template_id)
     if archetypes is None:
@@ -217,6 +257,7 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE):
     deck = os.path.join(out_dir, "deck.pptx")
     generate(src, plan, deck, synth_canvas=_synth_canvas_hints(src, plan, profile),
              canvas_backgrounds=(profile or {}).get("backgrounds"))
+    _stamp(deck, *(stamp or ("?", None)))
     renders = render_pptx_to_pngs(deck, os.path.join(out_dir, "render"))
     result = evaluate_deck(deck, brief="offline probe", label=f"probe_{name}",
                            render_dir=os.path.join(out_dir, "render"),
@@ -267,7 +308,8 @@ def main():
     for name, template_id in REAL_TEMPLATES:
         if args.only and args.only != name:
             continue
-        rows.append(probe(name, template_id, blocks, args.out, outline))
+        rows.append(probe(name, template_id, blocks, args.out, outline,
+                          stamp=(args.content, args.items)))
 
     print(f"\n# Офлайн-прогон, контент: {args.content}\n")
     for r in rows:
