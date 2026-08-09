@@ -108,9 +108,14 @@ SHORT = {
 }
 
 
+def _classified(archetypes):
+    return sum(1 for role in archetypes.values() if role != "other")
+
+
 def _cached_parse(template_id):
     """The archetype map + renders any earlier loop run left behind. Classifying
     needs the network; reusing a cached parse is what makes this offline."""
+    best = None
     for model in sorted(os.listdir(LOOP_ROOT)) if os.path.isdir(LOOP_ROOT) else []:
         path = os.path.join(LOOP_ROOT, model, template_id, "archetypes.json")
         if not os.path.exists(path):
@@ -124,8 +129,8 @@ def _cached_parse(template_id):
         if set(archetypes.values()) <= {"other"}:
             continue
         pngs = sorted(glob.glob(os.path.join(LOOP_ROOT, model, template_id, "rendered", "*.png")))
-        return archetypes, pngs
-    return None, None
+        best = (archetypes, pngs) if best is None or _classified(archetypes) > _classified(best[0]) else best
+    return best if best is not None else (None, None)
 
 
 def probe(name, template_id, blocks, out_root, outline=OUTLINE):
@@ -183,12 +188,21 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE):
                            render_dir=os.path.join(out_dir, "render"),
                            out_json=os.path.join(out_dir, "eval.json"))
     native = sum(1 for _, idx in plan if idx != SYNTHESIZE)
+    # How much of the TEMPLATE the parse actually classified. Without this the
+    # summary's "из шаблона 1/6" reads as "this template offers one usable
+    # slide", and that is how it was read for twenty iterations — survey-31's
+    # best cached parse labels 1 of its 31 slides and calls the other 30
+    # "other", i.e. the classification all but failed. loop._is_failed_parse
+    # only rejects a parse where EVERY slide is "other", so this one slips
+    # through and every content slide gets synthesized.
+    classified = _classified(archetypes)
     weak = {cid: v["score"] for cid, v in result["scores"].items()
             if v.get("score") is not None and v["score"] <= 3}
     return {
         "template": name, "deck": deck, "renders": renders,
         "total_100": result["total_100"],
         "native": f"{native}/{len(plan)}",
+        "parse": f"{classified}/{len(archetypes)}",
         "weak": weak,
         "unmeasured": [i + 1 for i, n in
                        enumerate(result["contrast"].get("unmeasured_boxes") or []) if n],
@@ -226,7 +240,11 @@ def main():
         if r.get("skipped"):
             print(f"- {r['template']:10} пропущен: {r['skipped']}")
             continue
-        print(f"- {r['template']:10} итог {r['total_100']:6}  из шаблона {r['native']:>4}"
+        weak_parse = ""
+        if r.get("parse"):
+            got, total = (int(x) for x in r["parse"].split("/"))
+            weak_parse = f"  разбор {r['parse']:>6}" + ("  ← почти всё «other»" if got * 2 < total else "")
+        print(f"- {r['template']:10} итог {r['total_100']:6}  из шаблона {r['native']:>4}{weak_parse}"
               + (f"  слабые: {r['weak']}" if r["weak"] else "  слабых нет")
               + (f"  НЕ ПРОВЕРЕН контраст: {r['unmeasured']}" if r["unmeasured"] else ""))
     print("\nПОСМОТРИ ГЛАЗАМИ — числа выше не заменяют взгляд на слайд:")
