@@ -167,12 +167,38 @@ def _band_height(bounds):
 
 # Clearance between synthesized content and the canvas's own header/footer.
 _CHROME_GAP_EMU = int(Inches(0.12))
+# A picture counts as a logo (chrome) when it is this small and this close to
+# the top or bottom edge. VK Education's wordmark: 0.54in tall (7% of 7.5in) at
+# 0.76in (10%) from the top; the same template's art panel is 6.74in tall and
+# stays a decor obstacle, not chrome.
+_LOGO_MAX_HEIGHT_FRACTION = 0.12
+_LOGO_EDGE_FRACTION = 0.15
 
 # A decor strip is only worth stepping around sideways if it runs down most of
 # the band (otherwise the vertical avoidance in _centered_top handles it) and is
 # narrow enough that giving it up costs little width.
 _SIDE_STRIP_MIN_COVERAGE = 0.5
 _SIDE_STRIP_MAX_WIDTH_FRACTION = 0.2
+
+
+def _canvas_pictures(slide):
+    """Pictures the canvas DRAWS: its own plus the ones its layout contributes.
+
+    slide.shapes is the slide's own list; a layout's logo, corner art or
+    photo frame render underneath it just the same and are invisible here.
+    Measured on VK Education: the cover-style layout carries the «education»
+    logo (3.03x0.54in at the top-left) and a 6.74in art panel as LAYOUT
+    pictures, the canvas slide itself has none — so every obstacle check saw an
+    empty slide, the synthesized title was drawn straight over the logo and the
+    image frame across the art. Master pictures are left out: the masters in
+    the corpus keep placeholders and groups, not pictures, and a slide-level
+    check has no business overriding a master's decision anyway."""
+    own = [s for s in slide.shapes if "PICTURE" in str(s.shape_type)]
+    try:
+        layout = slide.slide_layout
+    except Exception:
+        return own
+    return own + [s for s in layout.shapes if "PICTURE" in str(s.shape_type)]
 
 
 def _widen_to_template_if_clear(bounds, template_bounds, slide, slide_width, slide_height):
@@ -195,9 +221,7 @@ def _widen_to_template_if_clear(bounds, template_bounds, slide, slide_width, sli
     area = (slide_width or 1) * (slide_height or 1)
 
     def _blocked(lo, hi):
-        for shape in slide.shapes:
-            if "PICTURE" not in str(shape.shape_type):
-                continue
+        for shape in _canvas_pictures(slide):
             if None in (shape.left, shape.top) or not (shape.width and shape.height):
                 continue
             if (shape.width * shape.height) / area >= 0.9:
@@ -232,9 +256,7 @@ def _clip_to_side_decor(bounds, slide, slide_width, slide_height):
     # blobs spans about 10% of the band on its own, and only together do they
     # make a column worth stepping around. Merge the spans before judging.
     at_left, at_right = [], []
-    for shape in slide.shapes:
-        if "PICTURE" not in str(shape.shape_type):
-            continue
+    for shape in _canvas_pictures(slide):
         if None in (shape.left, shape.top) or not (shape.width and shape.height):
             continue
         if (shape.width * shape.height) / (slide_width * slide_height) >= _OBSTACLE_MAX_AREA_FRACTION:
@@ -287,11 +309,22 @@ def _clip_to_canvas_chrome(bounds, slide, slide_height):
 
     top, bottom = int(bounds["top"]), int(bounds["bottom"])
     middle = slide_height // 2
-    for shape in slide.shapes:
-        if shape.top is None or shape.height is None:
+    furniture = [s for s in slide.shapes
+                 if s.top is not None and s.height is not None
+                 and is_chrome_shape(s, slide_height)]
+    # A logo is chrome drawn as a picture, usually by the LAYOUT: small, and
+    # hugging the top or bottom edge. VK Education's «education» wordmark sits
+    # at 0.76in from the top, 0.54in tall, and the synthesized title was drawn
+    # over it because nothing here looked at pictures.
+    for pic in _canvas_pictures(slide):
+        if pic.top is None or not pic.height:
             continue
-        if not is_chrome_shape(shape, slide_height):
+        if pic.height > slide_height * _LOGO_MAX_HEIGHT_FRACTION:
             continue
+        edge = min(int(pic.top), slide_height - int(pic.top + pic.height))
+        if edge <= slide_height * _LOGO_EDGE_FRACTION:
+            furniture.append(pic)
+    for shape in furniture:
         if shape.top < middle:  # header band
             top = max(top, int(shape.top + shape.height) + _CHROME_GAP_EMU)
         else:                   # footer band
@@ -479,9 +512,7 @@ def _decor_obstacles(slide, slide_width, slide_height):
     if not area:
         return []
     spans = []
-    for shape in slide.shapes:
-        if "PICTURE" not in str(shape.shape_type):
-            continue
+    for shape in _canvas_pictures(slide):
         if shape.top is None or not shape.width or not shape.height:
             continue
         if (shape.width * shape.height) / area >= _OBSTACLE_MAX_AREA_FRACTION:
