@@ -39,13 +39,24 @@ ROTATION = ["GigaChat-2-Max", "GigaChat-2-Pro", "GigaChat-2", "GigaChat-3-Ultra"
 # stats family, generous boxes — so the deck always "fits" and the hard problems
 # (dense designer layouts, icon lists, capacity mismatches, mixed backgrounds)
 # never show up. These are the files actually uploaded to the product.
-TEMPLATE_ROTATION = [
+# The three templates of the VK Tech case (docs/TZ_VK.md). Two are worked on;
+# the third is BLIND: the final defence runs on a template no team has seen, so
+# one of ours stands in for it — generated and reviewed, never tuned against.
+# If a change lifts the two and drops the blind one, it was overfitting.
+VK_TEMPLATES = ["vk_tech", "vk_education"]
+BLIND_TEMPLATE = "vk_workspace"
+
+# The earlier corpus stays as a regression check, one turn in six.
+REGRESSION_TEMPLATES = [
     "custom_f496182bb15f42bb",   # Т—Ж Учебный шаблон (12 слайдов, лёгкий по весу)
     "custom_838830368dac3116",   # Т—Ж Монохромный — деловые презентации с цифрами (12)
     "custom_47dfd8952eb47583",   # Т—Ж Универсальный — для любых задач (12)
     "custom_30e96c06e2d47ec3",   # 31-слайдовая дека («example»)
     "custom_78dc579e05d11399",   # November survey results 2024 — 69 слайдов, самый тяжёлый
 ]
+
+# One cycle of six turns: VK×4, regression×1, blind×1.
+TEMPLATE_SCHEDULE = ["vk:0", "vk:1", "regression", "vk:0", "vk:1", "blind"]
 STATE_FILE = os.path.join(BASE, ".loop_state.json")
 
 
@@ -63,12 +74,20 @@ def _next_from_rotation():
     walks through combinations instead of pinning one template to one model.
     State file is gitignored so it never pollutes the safety-net commits."""
     st = _load_state()
-    i, j = st.get("i", 0), st.get("t", 0)
+    i, j, r = st.get("i", 0), st.get("t", 0), st.get("r", 0)
     model = ROTATION[i % len(ROTATION)]
-    template = TEMPLATE_ROTATION[j % len(TEMPLATE_ROTATION)]
+    slot = TEMPLATE_SCHEDULE[j % len(TEMPLATE_SCHEDULE)]
+    if slot == "blind":
+        template = BLIND_TEMPLATE
+    elif slot == "regression":
+        template = REGRESSION_TEMPLATES[r % len(REGRESSION_TEMPLATES)]
+        r += 1
+    else:
+        template = VK_TEMPLATES[int(slot.split(":")[1])]
     with open(STATE_FILE, "w") as f:
         json.dump({"i": (i + 1) % len(ROTATION),
-                   "t": (j + 1) % len(TEMPLATE_ROTATION)}, f)
+                   "t": (j + 1) % len(TEMPLATE_SCHEDULE),
+                   "r": r % len(REGRESSION_TEMPLATES)}, f)
     return model, template
 
 
@@ -133,6 +152,13 @@ def main():
     ev = result["evaluation"]
     print("\n" + format_report(ev))
     print(f"\nSlides: {result['n_slides']}  Skipped: {len(result['skipped'])}")
+    secs = result.get("deck_seconds")
+    if secs is not None:
+        # The VK Tech brief: one deck in at most 5 minutes.
+        verdict = "в норме ТЗ" if secs <= 300 else "ДОЛЬШЕ 5 МИНУТ — дефект по ТЗ"
+        print(f"Время сборки деки: {secs:.0f} с ({verdict})")
+    if source_name == BLIND_TEMPLATE:
+        print("[loop] СЛЕПОЙ шаблон: только контроль, правки по нему не делать")
     print(f"Из шаблона: {result['native_slides']} нативных / "
           f"{result['synth_slides']} синтезированных;  "
           f"шаблон предлагает {result['template_offered']} слайдов из {result['template_total']}")

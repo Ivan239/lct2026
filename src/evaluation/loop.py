@@ -288,8 +288,13 @@ def run_iteration(client, model, source_pptx, brief, source_name=None, out_root=
 
     ts = int(time.time())
     out_pptx = os.path.join(t["workdir"], "decks", f"deck_{ts}.pptx")
+    # Timed separately from ensure_template: the VK Tech brief caps ONE DECK at
+    # 5 minutes, and a first-time template parse (54-55 slides for two of its
+    # three templates) is a one-off cost that would otherwise hide inside it.
+    started = time.monotonic()
     plan, skipped = generate_deck(client, model, source_pptx, t["spec"], brief,
                                   t["style_preamble"], out_pptx, profile=t["profile"])
+    deck_seconds = round(time.monotonic() - started, 1)
     slide_roles = {pos: block["type"] for pos, (block, _) in enumerate(plan)}
 
     look_dir = os.path.join(t["workdir"], "decks", f"look_deck_{ts}")
@@ -311,6 +316,7 @@ def run_iteration(client, model, source_pptx, brief, source_name=None, out_root=
         "source_name": source_name,
         "deck": out_pptx,
         "n_slides": len(plan),
+        "deck_seconds": deck_seconds,
         "native_slides": native,
         "synth_slides": len(plan) - native,
         "template_offered": offered,
