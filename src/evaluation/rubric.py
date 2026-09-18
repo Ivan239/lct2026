@@ -81,6 +81,7 @@ CRITERIA = {
     "dop_safe_margins": ("Соблюдение безопасных полей", "det"),
     "dop_noise": ("Умеренное количество объектов", "det"),
     "dop_pacing": ("Единый темп презентации", "det"),
+    "dop_no_placeholders": ("Нет текста-заглушки шаблона", "det"),
 }
 
 # Seven weighted buckets from the rubric's final table. weight sums to 1.0.
@@ -125,7 +126,7 @@ BUCKETS = {
     "technical": {
         "title": "Техническое качество",
         "weight": 0.05,
-        "criteria": ["9.1", "9.3"],
+        "criteria": ["9.1", "9.3", "dop_no_placeholders"],
     },
 }
 

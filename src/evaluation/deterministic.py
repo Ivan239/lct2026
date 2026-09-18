@@ -388,6 +388,53 @@ def _is_widow(text, width_in, size_pt, metrics, margins_in):
     return (lone and last_w < WIDOW_MAX_FRACTION * budget_pt), len(lines)
 
 
+# ---------------------------------------------------------------------------
+# dop_no_placeholders — leftover template placeholder text (Appendix 1 of the
+# VK Tech brief, «Целостность»: lorem ipsum, XXX, TODO, «вставьте текст», and
+# the label words designers type into a slot they expect the author to
+# overwrite). Categorical, not a rate: one «Заголовок / Подзаголовок / Текст»
+# card left on a slide makes the slide unshowable, whatever the other seven
+# slides look like.
+#
+# Descends into GROUPS. That is the whole reason the check exists: the VK Tech
+# template keeps each card as a group, _clear_unclaimed_text walks only the
+# top-level slide.shapes, and the very first VK deck shipped two slides with 28
+# untouched «Текст» boxes under our own text — while every other criterion here
+# read the same top-level list and scored the deck 94.9.
+PLACEHOLDER_LABELS = {
+    "заголовок", "подзаголовок", "текст", "пункт", "название пункта",
+    "заголовок слайда", "название презентации", "описание", "подпись",
+    "имя фамилия", "title", "subtitle", "heading", "text", "body", "caption",
+}
+PLACEHOLDER_PATTERNS = re.compile(
+    r"lorem ipsum|\bxxx+\b|\btodo\b|вставьте текст|текст в две строки|"
+    r"в две или в одну строчку|ключевая мысль слайда",
+    re.IGNORECASE)
+
+
+def _iter_text_shapes_deep(shapes):
+    """Every text-bearing shape, groups opened recursively."""
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+    for s in shapes:
+        if s.shape_type == MSO_SHAPE_TYPE.GROUP:
+            yield from _iter_text_shapes_deep(s.shapes)
+        elif getattr(s, "has_text_frame", False):
+            yield s
+
+
+def _is_placeholder_text(text):
+    norm = _norm_text(text).strip(" .:;—–-")
+    if not norm:
+        return False
+    return norm in PLACEHOLDER_LABELS or bool(PLACEHOLDER_PATTERNS.search(norm))
+
+
+def placeholder_hits(slide):
+    """Placeholder strings left on the slide, groups included."""
+    return [s.text_frame.text.strip() for s in _iter_text_shapes_deep(slide.shapes)
+            if _is_placeholder_text(s.text_frame.text)]
+
+
 def evaluate(pptx_path, slide_roles=None):
     """slide_roles: optional {0-based position: role_str} so completeness can
     check the deck actually ends on a closing/summary. Returns
@@ -639,6 +686,20 @@ def evaluate(pptx_path, slide_roles=None):
     scores["dop_distribution"] = _evenness_score(char_counts, "символов контентных слайдов")
     paced = [p["chars"] + p["n_content"] * 40 for p in content_slides if p["chars"] > 0]
     scores["dop_pacing"] = _evenness_score(paced or char_counts, "объёма контентных слайдов")
+    # dop_no_placeholders — see placeholder_hits. Categorical: any slide with
+    # leftover template text caps the criterion at 1 (CLAUDE.md: a categorical
+    # defect must not be diluted by the slide count).
+    hit_slides = [(i + 1, placeholder_hits(sl)) for i, sl in enumerate(slides)]
+    hit_slides = [(num, hits) for num, hits in hit_slides if hits]
+    if hit_slides:
+        sample = "; ".join(f"слайд {num}: {len(hits)} ({', '.join(sorted(set(hits))[:3])})"
+                           for num, hits in hit_slides[:4])
+        scores["dop_no_placeholders"] = {
+            "score": 1,
+            "detail": f"текст-заглушка шаблона на {len(hit_slides)} слайдах — {sample}",
+        }
+    else:
+        scores["dop_no_placeholders"] = {"score": 5, "detail": "заглушек шаблона нет"}
     # 6.3 completeness
     if slide_roles:
         last_role = slide_roles.get(n - 1)
