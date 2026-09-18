@@ -1,4 +1,5 @@
 requests
+certifi
 python-dotenv
 python-pptx
 lxml
