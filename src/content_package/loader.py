@@ -62,7 +62,7 @@ class ContentPackageError(ValueError):
     """The package cannot be used; the message says what is wrong and where."""
 
 
-def load_package(path):
+def load_package(path, extract_to=None):
     """Load a content package from a folder or a .zip and decompose it.
 
     Returns a dict:
@@ -72,12 +72,13 @@ def load_package(path):
         images (list of {path, caption}),
         root (folder the package was read from)
 
-    A .zip is extracted into a temporary folder that lives as long as the
-    process; image paths point into it.
+    A .zip is extracted into `extract_to` (a folder the caller owns and
+    removes — the API does, per request), or into a fresh temporary folder that
+    nobody cleans; image paths point into it.
     """
     if not os.path.exists(path):
         raise ContentPackageError(f"контент-пакет не найден: {path}")
-    root = _extract_zip(path) if zipfile.is_zipfile(path) else path
+    root = _extract_zip(path, extract_to) if zipfile.is_zipfile(path) else path
     if not os.path.isdir(root):
         raise ContentPackageError(f"контент-пакет — это папка или .zip, а не файл: {path}")
     root = _single_top_folder(root)
@@ -180,8 +181,8 @@ def to_brief_text(package):
 
 # ---------------------------------------------------------------------------
 
-def _extract_zip(path):
-    target = tempfile.mkdtemp(prefix="content_package_")
+def _extract_zip(path, target=None):
+    target = tempfile.mkdtemp(prefix="content_package_", dir=target)
     with zipfile.ZipFile(path) as zf:
         for info in zf.infolist():
             name = info.filename

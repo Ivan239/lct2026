@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import sys
+import tempfile
 import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -22,6 +23,7 @@ from pydantic import BaseModel
 from common.model_fallback import TEXT_MODELS
 from common.pictures import has_oversized_picture
 from common.synthesis import SYNTHESIZE
+from content_package import ContentPackageError, extract_numbers, load_package, to_brief_text
 from content_parser.parser import RESIZE_FIELD_BY_TYPE, parse_brief, resize_block
 from content_parser.two_phase import generate_block, generate_outline, stat_fingerprints
 from design_system.extractor import build_archetype_map
@@ -33,6 +35,7 @@ from generator.slide_kit import content_text_shapes
 from generator.generator import generate, get_capacity
 from llm_clients.gigachat import GigaChatClient
 from matcher.matcher import match_content_to_slides, plan_from_outline
+from evaluation.deterministic import unsourced_numbers
 from qa.geometry import find_sparse_slides
 from rendering.render import render_pptx_to_pngs
 from template_parser.parser import extract_template
@@ -509,17 +512,72 @@ def get_progress():
 
 @app.post("/api/generate")
 def generate_presentation(req: GenerateRequest):
-    if req.template_id not in _template_registry:
+    return _generate_deck(req.template_id, req.brief, req.model)
+
+
+@app.post("/api/generate/package")
+def generate_from_package(template_id: str = Form(...), file: UploadFile = File(...),
+                          model: str | None = Form(None)):
+    """Generation from a content package (docs/CONTENT_PACKAGE.md): a .zip of
+    brief.md + optional package.json, facts.md, data/*.csv, images/*.
+
+    The package is decomposed; its parts are flattened into one labelled brief
+    for the text pipeline (content_parser.two_phase takes a string), and its
+    numbers become the reference for the check «все цифры со слайдов есть в
+    исходных материалах» in the response's warnings. A broken package is a 422
+    that names the problem, not a 500 three layers down."""
+    if template_id not in _template_registry:
+        raise HTTPException(status_code=404, detail="Шаблон не найден")
+    workdir = tempfile.mkdtemp(prefix="package_upload_")
+    try:
+        archive = os.path.join(workdir, os.path.basename(file.filename or "package.zip"))
+        with open(archive, "wb") as out:
+            shutil.copyfileobj(file.file, out)
+        try:
+            package = load_package(archive, extract_to=workdir)
+        except ContentPackageError as e:
+            raise HTTPException(status_code=422, detail=f"Контент-пакет: {e}")
+        result = _generate_deck(template_id, to_brief_text(package), model,
+                                source_numbers=package["numbers"])
+    finally:
+        shutil.rmtree(workdir, ignore_errors=True)
+    result["package"] = {
+        "title": package["title"],
+        "purpose": package["purpose"],
+        "facts": len(package["facts"]),
+        "numbers": len(package["numbers"]),
+        "tables": [t["name"] for t in package["tables"]],
+        "images": len(package["images"]),
+    }
+    return result
+
+
+def _numbers_warnings(pptx_path, source_numbers):
+    """One warning per slide that carries numbers the source does not — the
+    Appendix 1 question «все цифры и факты со слайда есть в исходных
+    материалах?», asked of every deck the service returns."""
+    by_slide = {}
+    for number, token in unsourced_numbers(pptx_path, source_numbers):
+        by_slide.setdefault(number, []).append(token)
+    return [{"slide": number, "kind": "numbers_not_in_source",
+             "details": "цифры, которых нет в исходных материалах: " + ", ".join(tokens)}
+            for number, tokens in sorted(by_slide.items())]
+
+
+def _generate_deck(template_id, brief, model=None, source_numbers=None):
+    """Plan → .pptx → previews → warnings. `source_numbers` — the content
+    package's numbers; None means the brief is the whole source."""
+    if template_id not in _template_registry:
         raise HTTPException(status_code=404, detail="Шаблон не найден")
 
-    archetype_map = _load_archetypes(req.template_id)
-    template_path = os.path.join(TEMPLATES_DIR, f"{req.template_id}.pptx")
+    archetype_map = _load_archetypes(template_id)
+    template_path = os.path.join(TEMPLATES_DIR, f"{template_id}.pptx")
 
     try:
-        plan, skipped = _plan_two_phase(req.template_id, req.brief, model=req.model)
+        plan, skipped = _plan_two_phase(template_id, brief, model=model)
         if plan is None:
             _set_progress("Разбираем бриф (запасной сценарий)")
-            plan, skipped = _plan_legacy(req.brief, archetype_map, template_path, model=req.model)
+            plan, skipped = _plan_legacy(brief, archetype_map, template_path, model=model)
 
         if not plan:
             raise HTTPException(status_code=422, detail="Ни один блок контента не подошёл ни к одному слайду шаблона")
@@ -530,8 +588,8 @@ def generate_presentation(req: GenerateRequest):
         try:
             _set_progress("Собираем .pptx в стиле шаблона")
             generate(template_path, plan, out_pptx,
-                     synth_canvas=_synth_canvas_hints(req.template_id, plan),
-                     canvas_backgrounds=_measured_backgrounds(req.template_id))
+                     synth_canvas=_synth_canvas_hints(template_id, plan),
+                     canvas_backgrounds=_measured_backgrounds(template_id))
             _set_progress("Рендерим превью слайдов")
             slide_png_paths = render_pptx_to_pngs(out_pptx, GENERATED_DIR)
         except Exception as e:
@@ -555,6 +613,12 @@ def generate_presentation(req: GenerateRequest):
         ]
     except Exception:
         warnings = []  # advisory only — must never break a successful generation
+    try:
+        if source_numbers is None:
+            source_numbers = extract_numbers(brief)
+        warnings += _numbers_warnings(out_pptx, source_numbers)
+    except Exception:  # noqa: BLE001 — advisory, same as above
+        pass
 
     return {
         "generation_id": generation_id,
