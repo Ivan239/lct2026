@@ -262,17 +262,53 @@ def _text_rect(shape, metrics_for):
     return int(shape.left), top, int(shape.left + shape.width), top + est
 
 
-def _text_collisions(content, metrics_for):
+def _table_cell_rects(shapes):
+    """The rectangle of every non-empty cell of every native table.
+
+    A table is a graphicFrame: its cells are not text frames, so the collision
+    walk never saw them, and a deck whose synthesized slide and closing were
+    drawn straight over a table canvas scored a clean 92.4 on geometry
+    (iter143, WorkSpace 9 and 11). Cell geometry is the frame's origin plus the
+    accumulated column widths and row heights — the same arithmetic PowerPoint
+    lays the grid out with."""
+    from generator.slide_kit import placed_shapes
+
+    rects = []
+    for shape in placed_shapes(shapes):
+        if not (getattr(shape, "has_table", False) and shape.has_table):
+            continue
+        if shape.left is None or shape.top is None:
+            continue
+        widths = [int(c.width) for c in shape.table.columns]
+        heights = [int(r.height) for r in shape.table.rows]
+        top = int(shape.top)
+        for row_idx, row in enumerate(shape.table.rows):
+            left = int(shape.left)
+            for col_idx, cell in enumerate(row.cells):
+                if cell.text.strip():
+                    rects.append((left, top, left + widths[col_idx], top + heights[row_idx]))
+                left += widths[col_idx]
+            top += heights[row_idx]
+    return rects
+
+
+def _text_collisions(content, metrics_for, slide=None):
     """Pairs of content blocks whose TEXT lands on top of other text.
 
     Not box rectangles: CLAUDE.md records that those intersect by design (51
     hits on the pristine 69-slide original). Text bands are a different measure —
     zero hits on four of the five real templates, and on the fifth only the
-    footnotes the designer tucked under a heading on purpose."""
+    footnotes the designer tucked under a heading on purpose.
+
+    Table cells count as text, since a table's own text is text: measured on
+    the corpus, the rule adds zero hits on all 13 untouched templates and fires
+    on exactly the two decks that printed our text across a template table
+    (iter144)."""
     rects = [r for r in (_text_rect(s, metrics_for) for s in content) if r]
+    cells = _table_cell_rects(slide.shapes) if slide is not None else []
     hits = 0
     for i, a in enumerate(rects):
-        for b in rects[i + 1:]:
+        for b in rects[i + 1:] + cells:
             dx = min(a[2], b[2]) - max(a[0], b[0])
             dy = min(a[3], b[3]) - max(a[1], b[1])
             if dx <= 0 or dy <= 0:
@@ -591,7 +627,7 @@ def evaluate(pptx_path, slide_roles=None):
         display_only = (len(content) <= 2
                         and any(_is_display_figure(s) for s in content))
         overflow = sum(1 for s in content if _overflows(s, metrics_for))
-        collide = _text_collisions(content, metrics_for)
+        collide = _text_collisions(content, metrics_for, slide=slide)
         word_break = sum(1 for s in content if _breaks_a_word(s, metrics_for))
         tiny = sum(1 for s in content if (_shape_max_size(s) or 99) < min_readable_pt)
         oob = 0
