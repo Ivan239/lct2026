@@ -19,6 +19,7 @@ from common.json_utils import extract_json
 from common.phrases import (DANGLING_TAIL_WORDS, cut_at_clause, cut_at_clause_chars,
                             drop_dangling_function_words)
 from common.model_fallback import TEXT_MODELS, call_with_model_fallback
+from common.prompt_files import load_prompt
 from common.synthesis import SYNTHESIZABLE_TYPES
 from template_spec.builder import describe_for_prompt
 
@@ -326,6 +327,7 @@ def _validate_block(block, role, count):
 # invented locally); a surplus is cut to the first N (_take_exactly).
 MAX_TITLE_WORDS = 9
 MAX_BULLET_CHARS = 72
+SHORTEN_ITEMS_PROMPT = "shorten_items.v1.txt"
 
 
 def bullet_char_budget(template_budget):
@@ -370,6 +372,56 @@ def _guard_widow(text):
 ITEM_KEEP_WHOLE_RATIO = 1.4
 
 
+def _keep_whole_ceiling(max_chars):
+    # Never past the flat cap: MAX_BULLET_CHARS is the limit for roomy boxes,
+    # where there is no slot line for the fitter to shrink onto.
+    return min(int(max_chars * ITEM_KEEP_WHOLE_RATIO), max(MAX_BULLET_CHARS, max_chars))
+
+
+_ITEM_FIELDS = ("bullets", "left_points", "right_points")
+
+
+def _shorten_overlong_items(client, block, max_chars, models):
+    """One corrective call for the items no trim can save: longer than the
+    keep-whole ceiling, so they would be cut at a word.
+
+    No cut keeps the sense of a 45-character sentence in a 28-character slot:
+    «Наставники проходят короткий [курс подготовки]», «Программой охвачены
+    ключевые [команды]» (iter134) — and dropping the dangling adjective only
+    moves the stop one word back. The model can write the shorter phrase; code
+    cannot. Only the offending items are sent, once; whatever comes back is
+    used only where it is a real improvement (not longer than the ceiling, not
+    shorter than the cut), and a failed call leaves the items to the trim as
+    before — a corrective call must never cost the block (iter117)."""
+    ceiling = _keep_whole_ceiling(max_chars)
+    over = [(field, i, str(item)) for field in _ITEM_FIELDS
+            for i, item in enumerate(block.get(field) or []) if len(str(item)) > ceiling]
+    if not over:
+        return block
+    prompt = (load_prompt(SHORTEN_ITEMS_PROMPT)
+              .replace("__MAXCHARS__", str(max_chars))
+              .replace("__COUNT__", str(len(over)))
+              .replace("__ITEMS__", "\n".join(f"- {text}" for _, _, text in over)))
+
+    def call(model):
+        result = client.chat([{"role": "user", "content": prompt}], model=model, max_tokens=600)
+        items = extract_json(result["choices"][0]["message"]["content"])
+        if not isinstance(items, list) or len(items) != len(over):
+            raise ValueError(f"expected {len(over)} shortened items")
+        return [str(x).strip() for x in items]
+
+    try:
+        rewritten = call_with_model_fallback(call, models, retries_per_model=2)
+    except (ValueError, KeyError):
+        return block
+    for (field, i, original), text in zip(over, rewritten):
+        # Only an improvement is taken: a rewrite shorter than the cut it
+        # replaces would say less than the cut does.
+        if text and len(_trim_to_budget(original, max_chars)) <= len(text) <= ceiling:
+            block[field][i] = text
+    return block
+
+
 def _trim_to_budget(item, max_chars):
     """An over-long item: cut at a CLAUSE boundary within the budget; failing
     that, kept whole while it is at most ITEM_KEEP_WHOLE_RATIO over; only past
@@ -387,19 +439,17 @@ def _trim_to_budget(item, max_chars):
     The word-boundary rule below it still guards the last resort:"""
     if len(item) <= max_chars:
         return item
-    clause = cut_at_clause_chars(item, max_chars)
+    clause = cut_at_clause_chars(item, max_chars, dash=False)
     if clause:
         return clause
-    # Never past the flat cap: MAX_BULLET_CHARS is the limit for roomy boxes,
-    # where there is no slot line for the fitter to shrink onto.
-    ceiling = min(int(max_chars * ITEM_KEEP_WHOLE_RATIO), max(MAX_BULLET_CHARS, max_chars))
+    ceiling = _keep_whole_ceiling(max_chars)
     if len(item) <= ceiling:
         return item
     # Past the ceiling a word cut has to happen, and it goes at the BUDGET, not
     # the ceiling: a longer cut is not a better one — at 35 characters «Ручной
     # сбор показателей из семи независимых систем» came out «…из семи», a
     # preposition and a numeral without their noun.
-    return cut_at_clause_chars(item, ceiling) or _trim_at_word(item, max_chars)
+    return cut_at_clause_chars(item, ceiling, dash=False) or _trim_at_word(item, max_chars)
 
 
 def _trim_at_word(item, max_chars):
@@ -538,4 +588,5 @@ def generate_block(client, role, theme, brief, count=None, models=TEXT_MODELS,
         # slide is a defect, a crashed iteration is worse. Take the block.
         block = call_with_model_fallback(make_call(False), models)
     block["type"] = role
+    block = _shorten_overlong_items(client, block, max_chars, models)
     return _enforce_text_budgets(block, role, max_chars)

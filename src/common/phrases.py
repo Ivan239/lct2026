@@ -39,15 +39,22 @@ def drop_dangling_function_words(text):
 CLAUSE_OPENERS = {"и", "а", "но", "или", "чтобы", "потому", "поэтому", "однако", "либо"}
 
 
-def cut_at_clause_chars(text, max_chars):
+def cut_at_clause_chars(text, max_chars, dash=True):
     """`text` cut at the LATEST clause boundary within max_chars characters, or
     None when there is none. Same boundaries as cut_at_clause: before a clause
-    opener, after a comma or a dash."""
+    opener, after a comma or — unless dash=False — at a dash.
+
+    A list item passes dash=False: there the dash stands for the verb, and what
+    follows it IS the content — «Без наставников — дольше адаптация» came out
+    «Без наставников», «Наставники — опытные сотрудники команд» as «Наставники»
+    (iter135)."""
     words = text.split()
     best = None
     for i in range(1, len(words)):
         stripped = words[i].lower().strip(".,;:—-")
-        ends_clause = words[i - 1].endswith(",") or words[i - 1].endswith("—")
+        if not dash and (words[i] in ("—", "–") or words[i - 1] in ("—", "–")):
+            continue
+        ends_clause = words[i - 1].endswith(",") or (dash and words[i - 1].endswith("—"))
         if stripped in CLAUSE_OPENERS or ends_clause:
             cut = drop_dangling_function_words(" ".join(words[:i]).rstrip(".,;:—- "))
             if cut and len(cut) <= max_chars:
