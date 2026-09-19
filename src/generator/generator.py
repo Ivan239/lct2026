@@ -2,19 +2,21 @@ import statistics
 from collections import Counter
 
 from pptx import Presentation
+from pptx.dml.color import RGBColor
 from pptx.enum.dml import MSO_COLOR_TYPE
 from pptx.enum.shapes import MSO_SHAPE_TYPE, PP_PLACEHOLDER
 from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Length, Pt
 
-from common.pictures import OVERSIZED_PICTURE_AREA_RATIO, is_stale_data_picture
+from common.pictures import (OVERSIZED_PICTURE_AREA_RATIO, _appears_on_other_slides,
+                             _covers_slide_text, is_stale_data_picture)
 from common.phrases import drop_dangling_function_words
 from common.synthesis import SYNTHESIZE
 from fonts.metrics import FontResolver
 from generator.deck_style import apply_observed_style, observe_deck_style
 from generator.layout_bounds import infer_content_bounds
-from generator.synthesizer import SYNTHESIZERS
+from generator.synthesizer import IMAGE_PLACEHOLDER_NAME, SYNTHESIZERS
 from generator.text_fit import (
     SINGLE_LINE_SAFETY,
     _usable_width_in,
@@ -1585,6 +1587,119 @@ def get_item_char_budget(slide, archetype):
     return max(MIN_ITEM_CHARS, round(max(lengths) * ITEM_CHARS_SLACK))
 
 
+# A template picture smaller than this share of the slide is an icon or a
+# badge, not part of the slide's image slot. Measured on the VK templates: the
+# image slots of VK Education's image_caption slides are 17% (the phone mockup)
+# to 60% of the slide; the largest non-slot pictures — VK Tech's card
+# illustrations — are 5.8–9.7%, and a threshold of 5% would have taken them.
+IMAGE_SLOT_MIN_AREA_FRACTION = 0.10
+
+
+def _is_picture_group(shape):
+    """A GROUP made of pictures only, with no text anywhere inside — a mockup
+    assembled from parts (VK Education's phone: a frame picture and a screen
+    picture). python-pptx reports it as GROUP, so a PICTURE filter misses it."""
+    if shape.shape_type != MSO_SHAPE_TYPE.GROUP:
+        return False
+    leaves = []
+
+    def walk(group):
+        for child in group.shapes:
+            if child.shape_type == MSO_SHAPE_TYPE.GROUP:
+                walk(child)
+            else:
+                leaves.append(child)
+
+    walk(shape)
+    return bool(leaves) and all(leaf.shape_type == MSO_SHAPE_TYPE.PICTURE for leaf in leaves)
+
+
+def _image_slot_pictures(slide):
+    """The pictures that make up the image slot of an image_caption slide.
+
+    The template's image slot never holds OUR image: it holds the designer's
+    sample. On VK Education that was a laptop mockup of the VK Store community
+    page (a girl in a hoodie, «место встречи, Невский 28») under our heading
+    «Единая картина продаж», and a VK Education post screenshot under ours
+    elsewhere (iter103, iter106).
+
+    Every picture of a meaningful size that is not a background under the
+    slide's text belongs to the slot. Repetition across slides does NOT spare
+    it here, unlike in is_stale_data_picture: the VK Store screen is reused by
+    the template's laptop and phone mockups alike, and brand art in an image
+    slot is not the author's image either. A phone next to a laptop is two
+    mockups and one slot, so all of them go — the phone being a group of
+    pictures, not a picture."""
+    area = (_slide_width(slide) or 0) * (_slide_height(slide) or 0)
+    if not area:
+        return []
+    return [shape for shape in slide.shapes
+            if (shape.shape_type == MSO_SHAPE_TYPE.PICTURE or _is_picture_group(shape))
+            and shape.width and shape.height
+            and shape.width * shape.height / area >= IMAGE_SLOT_MIN_AREA_FRACTION
+            and not _covers_slide_text(shape, slide)]
+
+
+# Skeleton frame and label colour on a native slide: the slide's own text colour
+# is usually inherited from its placeholder and cannot be copied (nor resolved —
+# CLAUDE.md), and an autoshape's default text is white. Mid-grey reads on the
+# light and the dark templates alike.
+_SKELETON_GREY = RGBColor(0x88, 0x88, 0x88)
+
+
+def _replace_image_slot(slide, caption, style_run, margin_emu=0):
+    """Swap the template's sample picture(s) for the dashed image skeleton the
+    synthesized image_caption slides draw — the honest marker of «your image
+    goes here» — over the box they occupied. The font is copied from
+    `style_run` (the slide's title run) so the label is set in the template's
+    typeface."""
+    import copy
+
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+
+    pictures = _image_slot_pictures(slide)
+    if not pictures:
+        return None
+    # Mockups are placed bleeding off the edge (the VK Education laptop runs
+    # past the right side); a skeleton cut by the slide edge reads as broken.
+    # The frame keeps the margin the template keeps: the title's own left
+    # offset, mirrored on the other three sides.
+    width, height = int(_slide_width(slide)), int(_slide_height(slide))
+    left = max(min(int(p.left) for p in pictures), margin_emu)
+    top = max(min(int(p.top) for p in pictures), margin_emu)
+    right = min(max(int(p.left + p.width) for p in pictures), width - margin_emu)
+    bottom = min(max(int(p.top + p.height) for p in pictures), height - margin_emu)
+    if right - left < int(Inches(1)) or bottom - top < int(Inches(1)):
+        return None
+    for picture in pictures:
+        picture._element.getparent().remove(picture._element)
+    frame = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
+                                   Emu(left), Emu(top), Emu(right - left), Emu(bottom - top))
+    frame.name = IMAGE_PLACEHOLDER_NAME
+    frame.shadow.inherit = False
+    frame.fill.background()
+    frame.line.color.rgb = _SKELETON_GREY
+    frame.line.width = Pt(1.5)
+    ln = frame.line._get_or_add_ln()
+    ln.append(ln.makeelement(qn("a:prstDash"), {"val": "dash"}))
+    tf = frame.text_frame
+    tf.word_wrap = True
+    tf.vertical_anchor = MSO_ANCHOR.MIDDLE
+    lines = [("ИЗОБРАЖЕНИЕ", 12, True)] + ([(caption, 14, False)] if caption else [])
+    for i, (text, size, bold) in enumerate(lines):
+        para = tf.paragraphs[0] if i == 0 else tf.add_paragraph()
+        para.alignment = PP_ALIGN.CENTER
+        run = para.add_run()
+        run.text = text
+        if style_run is not None and style_run._r.rPr is not None:
+            run._r.insert(0, copy.deepcopy(style_run._r.rPr))
+        run.font.size = Pt(size)
+        run.font.bold = bold
+        run.font.color.rgb = _SKELETON_GREY
+    return frame
+
+
 def _fill_image_caption(slide, data, claimed_ids, resolver=None):
     """Native image_caption slide: the template already supplies the artwork, so
     we only write the heading and the caption describing what the image shows.
@@ -1599,8 +1714,19 @@ def _fill_image_caption(slide, data, claimed_ids, resolver=None):
     _set_run_text(title_shape, data.get("title", ""), claimed_ids, resolver=resolver)
     caption_shape = _pick_body_shape(slide, claimed_ids)
     _align_left_edges(title_shape, caption_shape)
-    _set_run_text(caption_shape, data.get("image", "") or data.get("caption", ""),
-                  claimed_ids, resolver=resolver)
+    description = data.get("image", "") or data.get("caption", "")
+    _set_run_text(caption_shape, description, claimed_ids, resolver=resolver)
+    # The description goes INTO the skeleton only when no caption box took it —
+    # otherwise the slide would say the same sentence twice.
+    caption_taken = caption_shape is not None and caption_shape.shape_id in claimed_ids
+    style = None
+    if title_shape is not None and title_shape.has_text_frame:
+        style = next((r for p in title_shape.text_frame.paragraphs for r in p.runs), None)
+    margin = int(title_shape.left) if title_shape is not None and title_shape.left else 0
+    frame = _replace_image_slot(slide, None if caption_taken else description, style,
+                                margin_emu=margin)
+    if frame is not None:
+        claimed_ids.add(frame.shape_id)
 
 
 FILLERS = {
