@@ -95,7 +95,8 @@
 ## 6. Тесты и коммит
 
 `.venv/bin/python3 -m pytest tests/ -q`
-- Зелёные и правка обоснована → `git add src tests scripts docs prompts samples && git commit`.
+- Зелёные и правка обоснована → `git add src tests scripts docs samples CLAUDE.md && git commit`
+  (+ `prompts`, когда папка появится: несуществующий путь роняет весь `git add`).
 - Красные или сомнительно → `git checkout -- . && git clean -fd src tests scripts docs prompts samples`,
   неудачу записать в бэклог. Дерево сломанным не оставлять.
 
