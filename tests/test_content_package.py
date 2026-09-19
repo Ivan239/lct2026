@@ -14,7 +14,7 @@ import zipfile
 
 import pytest
 
-from conftest import ROOT  # noqa: F401
+from conftest import ROOT
 
 from content_package import (ContentPackageError, extract_numbers, load_package,
                              to_brief_text)
@@ -113,3 +113,28 @@ def test_the_flattened_brief_keeps_the_parts_labelled(tmp_path):
     assert "Таблица «kpi»: Метрика, Значение" in text
     assert "  NPS | 48" in text
     assert "Нужно убедить директора." in text
+
+
+def test_a_semicolon_csv_with_decimal_commas_keeps_its_columns(tmp_path):
+    """The usual Russian export: «;» between fields, a decimal comma inside
+    them. csv.Sniffer chose the comma and split «План, млн ₽» and «6,2»."""
+    root = _package(str(tmp_path / "pkg"),
+                    tables={"budget.csv": "Месяц;План, млн ₽;Факт, млн ₽\nИюль;6,2;5,8\nАвгуст;6,0;5,6\n"})
+    table = load_package(root)["tables"][0]
+    assert table["columns"] == ["Месяц", "План, млн ₽", "Факт, млн ₽"]
+    assert table["rows"] == [["Июль", "6,2", "5,8"], ["Август", "6,0", "5,6"]]
+    assert table["numeric_columns"] == ["План, млн ₽", "Факт, млн ₽"]
+
+
+def test_the_sample_packages_load_with_facts_numbers_and_a_table():
+    """The three packages in samples/ are the loop's content until real ones
+    exist: one per purpose from the brief, each with facts and a table."""
+    base = os.path.join(ROOT, "samples", "content_packages")
+    purposes = set()
+    for name in sorted(os.listdir(base)):
+        pkg = load_package(os.path.join(base, name))
+        purposes.add(pkg["purpose"])
+        assert pkg["facts"] and pkg["numbers"], name
+        assert pkg["tables"] and all(len(t["columns"]) > 1 for t in pkg["tables"]), name
+        assert any(t["numeric_columns"] for t in pkg["tables"]), name
+    assert {"feature", "project", "initiative"} <= purposes

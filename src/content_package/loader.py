@@ -252,12 +252,8 @@ def _read_tables(folder):
         if not name.lower().endswith(".csv"):
             continue
         text = _read_text(os.path.join(folder, name))
-        dialect = csv.excel
-        try:
-            dialect = csv.Sniffer().sniff(text[:2048], delimiters=",;\t")
-        except csv.Error:
-            pass
-        rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text), dialect)
+        delimiter = _detect_delimiter(text)
+        rows = [[c.strip() for c in r] for r in csv.reader(io.StringIO(text), delimiter=delimiter)
                 if any(c.strip() for c in r)]
         if not rows:
             continue
@@ -267,6 +263,22 @@ def _read_tables(folder):
         tables.append({"name": os.path.splitext(name)[0], "columns": columns,
                        "rows": body, "numeric_columns": numeric})
     return tables
+
+
+def _detect_delimiter(text):
+    """The delimiter that gives every row the same number of columns (>1).
+
+    csv.Sniffer guesses wrong on the most common Russian CSV: «;» between
+    fields and a decimal COMMA inside them («6,2»). It picked the comma, and a
+    three-column budget table came back as «Месяц;План | млн ₽;Факт | млн ₽».
+    Tab and semicolon are tried before the comma for the same reason: when both
+    are consistent, the comma is the one that also serves as a decimal mark."""
+    lines = [line for line in text.splitlines() if line.strip()][:20]
+    for delimiter in ("\t", ";", ","):
+        counts = {len(next(csv.reader([line], delimiter=delimiter))) for line in lines}
+        if len(counts) == 1 and counts.pop() > 1:
+            return delimiter
+    return ","
 
 
 def _is_number(cell):
