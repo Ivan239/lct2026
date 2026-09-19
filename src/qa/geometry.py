@@ -250,6 +250,69 @@ def keep_text_clear_of_side_art(prs, resolver, slide_indices=None):
     return changed
 
 
+def _left_aligned(shape):
+    from pptx.enum.text import PP_ALIGN
+    aligns = {p.alignment for p in shape.text_frame.paragraphs if p.runs}
+    return aligns <= {None, PP_ALIGN.LEFT, PP_ALIGN.JUSTIFY}
+
+
+def keep_text_inside_slide(prs, resolver, slide_indices=None):
+    """Narrow a left-aligned text box that runs past the slide's right edge.
+
+    VK Education's KPI slide sets its right column at 8.87in in boxes 4.92 and
+    5.92in wide — to 13.79 and 14.79in on a 13.33in slide. The designer's own
+    «23%» and «Объяснение этого показателя» end well inside; ours ran on, and
+    «Снижение успешных поисков из-за точности» was cut by the slide edge
+    (iter136; the harness flagged 4-9 such boxes on three decks, iter127-136).
+    The box now ends at the slide's right margin — the mirror of the left margin
+    its own text keeps — and wraps there; enforce_text_fits, which runs next,
+    fits the wrapped text to the box height.
+
+    Left-aligned text only: narrowing a centred box moves its centre (VK Tech
+    centres its «10» in boxes that overhang by 0.1-0.2in). Top-level boxes, like
+    keep_text_clear_of_side_art. Returns the shapes it narrowed."""
+    changed = []
+    slide_width = int(prs.slide_width)
+    indices = range(len(prs.slides._sldIdLst)) if slide_indices is None else slide_indices
+    for slide_idx in indices:
+        slide = prs.slides[slide_idx]
+        texts_shapes = [s for s in slide.shapes if s.has_text_frame and s.text_frame.text.strip()
+                        and s.left is not None and s.width]
+        lefts = [int(s.left) for s in texts_shapes if int(s.left) > 0]
+        if not lefts:
+            continue
+        right_bound = slide_width - min(lefts)
+        for shape in texts_shapes:
+            if int(shape.left + shape.width) <= slide_width:
+                continue
+            if not shape.text_frame.word_wrap or not _left_aligned(shape):
+                continue
+            width = right_bound - int(shape.left)
+            if width < SIDE_ART_MIN_CLEAR_FRACTION * int(shape.width):
+                continue
+            shape.width = Emu(width)
+            size_pt = max((r.font.size.pt for p in shape.text_frame.paragraphs
+                           for r in p.runs if r.font.size and r.text.strip()), default=None)
+            font_name = next((r.font.name for p in shape.text_frame.paragraphs
+                              for r in p.runs if r.font.name), None)
+            metrics = resolver.metrics_for(font_name) if font_name else None
+            if size_pt and metrics is not None:
+                # Same reason as in keep_text_clear_of_side_art: a size fitted
+                # to the old width can break a long word in the new one.
+                capped = cap_size_to_longest_word(
+                    [t for t in _shape_texts(shape) if t.strip()], shape.width, size_pt,
+                    metrics=metrics, margins_in=horizontal_margins_in(shape),
+                    bold=any(r.font.bold for p in shape.text_frame.paragraphs
+                             for r in p.runs if r.font.bold))
+                if float(capped) < size_pt:
+                    for para in shape.text_frame.paragraphs:
+                        for run in para.runs:
+                            if run.font.size:
+                                run.font.size = Pt(float(capped))
+            changed.append((slide_idx, shape.shape_id))
+    return changed
+
+
 def drop_needless_soft_hyphens(prs, resolver, slide_indices=None):
     """Remove soft hyphens from words that fit after the final size is known.
 
