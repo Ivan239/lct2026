@@ -155,3 +155,28 @@ def has_oversized_picture(slide, slide_width, slide_height):
             if area / slide_area > OVERSIZED_PICTURE_AREA_RATIO and is_stale_data_picture(shape, slide):
                 return True
     return False
+
+
+def has_data_object(slide):
+    """True when the slide carries a native TABLE or CHART — the designer's
+    sample data in its most literal form.
+
+    Nothing fills them yet (native tables and charts are backlog item 5), so a
+    slide matched for its text boxes ships the table as the template left it:
+    on VK Education «Заголовок столбца, млн», «Акцент», «Строка» and demo
+    figures 15/10/14/4 stood next to our bullets (iter109). The same stale-data
+    reasoning as has_oversized_picture, without a pixel heuristic — the document
+    SAYS what the object is. Groups are opened: a graphic frame can sit inside
+    one."""
+    def walk(shapes):
+        for shape in shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                if walk(shape.shapes):
+                    return True
+            elif getattr(shape, "has_table", False) and shape.has_table:
+                return True
+            elif getattr(shape, "has_chart", False) and shape.has_chart:
+                return True
+        return False
+
+    return walk(slide.shapes)

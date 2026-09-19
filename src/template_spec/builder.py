@@ -12,6 +12,7 @@ changing consumers."""
 
 from pptx import Presentation
 
+from common.pictures import has_data_object
 from generator.generator import get_capacity, get_item_char_budget
 from generator.slide_kit import content_text_shapes
 
@@ -53,6 +54,14 @@ def build_spec(template_path, archetype_map, style_profile=None):
         # it just isn't fillable, so it drops out of the family and the role gets
         # synthesized instead.
         if not content_text_shapes(prs.slides[idx]):
+            continue
+        # A slide around a native TABLE or CHART is someone else's data: its
+        # text boxes are fillable, the table is not (backlog item 5), and it
+        # ships as the template left it — «Заголовок столбца, млн», «Строка»
+        # and demo figures next to our bullets on VK Education (iter109).
+        # Here, not at parse time: build_spec runs on every generation, so the
+        # rule reaches templates whose classification is already cached.
+        if has_data_object(prs.slides[idx]):
             continue
         entry = {"idx": idx, "capacity": None, "bg": backgrounds.get(idx)}
         if role in COUNTED_ROLES:
