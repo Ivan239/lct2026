@@ -1400,6 +1400,69 @@ def _order_stat_pair(first, second):
     return first, second
 
 
+# Figures and captions are told apart by size when the largest box is at least
+# this many times the smallest: display figures on the VK Tech board are
+# 116-153pt over 10pt captions, the T-Zh universal board 24pt over 11pt.
+_FIGURE_SIZE_RATIO = 1.5
+
+
+def _center(shape):
+    return (int(shape.left or 0) + int(shape.width or 0) / 2,
+            int(shape.top or 0) + int(shape.height or 0) / 2)
+
+
+def _stat_pairs(boxes):
+    """(figure_box, label_box) pairs for a KPI board, in reading order.
+
+    Pairing neighbours in reading order — boxes[0] with boxes[1] — assumes each
+    figure is followed by its own caption. A board that sets the figures in a
+    ROW and the captions in a row under them breaks that: on VK Tech the two
+    display boxes (153pt, 116pt) come first, so «4 из 6» and its caption
+    «модулей CRM» both went into display boxes and wrapped over each other at
+    116-153pt, while the next figure, «86%», went into a 10pt caption box
+    (iter114, slide 4).
+
+    When the boxes split cleanly into big figures and small captions, one
+    caption per figure, each figure takes the nearest free caption. Otherwise
+    the old neighbour pairing stands (ordered inside the pair by size)."""
+    sizes = [(_max_font_pt(b) or 0) for b in boxes]
+    known = [s for s in sizes if s]
+    if len(known) == len(boxes) and known and max(known) >= _FIGURE_SIZE_RATIO * min(known):
+        cut = (max(known) * min(known)) ** 0.5
+        figures = [b for b, s in zip(boxes, sizes) if s >= cut]
+        captions = [b for b, s in zip(boxes, sizes) if s < cut]
+        if len(figures) == len(captions):
+            pairs, free = [], list(captions)
+            for figure in figures:
+                fx, fy = _center(figure)
+                caption = min(free, key=lambda c: abs(_center(c)[0] - fx) + abs(_center(c)[1] - fy))
+                free.remove(caption)
+                pairs.append((figure, caption))
+            return pairs
+    return [_order_stat_pair(boxes[i], boxes[i + 1]) for i in range(0, len(boxes) - 1, 2)]
+
+
+def _keep_figure_on_one_line(box, text, resolver=None):
+    """A KPI figure is ONE line — the rule _fill_display_stat already follows
+    for a lone figure, applied to every figure box of a board. The template's
+    own figure is «7» at 153pt in a 2.60in box; ours was «4 из 6», which at
+    that size wraps to three lines that print over each other. The size comes
+    down to the largest one line holds; enforce_text_fits does not do it,
+    because the designer's box is shorter than its own line by design and QA
+    leaves such boxes alone."""
+    size = _max_font_pt(box)
+    if not size or not text:
+        return
+    metrics = _metrics_for_run(_reference_run(box), resolver)
+    # A Length (EMU), not points — compared as such it never looked smaller.
+    fitted = fit_font_size_single_line([text], box.width, size, min_size_pt=MIN_READABLE_PT,
+                                       metrics=metrics, margins_in=horizontal_margins_in(box))
+    if fitted is not None and fitted.pt < size:
+        for paragraph in box.text_frame.paragraphs:
+            for run in paragraph.runs:
+                run.font.size = fitted
+
+
 def _fill_stats_kpi(slide, data, claimed_ids, resolver=None):
     title_shape = _stats_title_shape(slide, claimed_ids)
     _set_run_text(title_shape, data.get("title", ""), claimed_ids, resolver=resolver)
@@ -1417,9 +1480,9 @@ def _fill_stats_kpi(slide, data, claimed_ids, resolver=None):
     max_pairs = len(boxes) // 2
 
     if max_pairs >= 1:
-        for i, (num, label) in enumerate(stats[:max_pairs]):
-            figure_box, label_box = _order_stat_pair(boxes[i * 2], boxes[i * 2 + 1])
+        for (num, label), (figure_box, label_box) in zip(stats[:max_pairs], _stat_pairs(boxes)):
             _set_run_text(figure_box, num, claimed_ids, resolver=resolver)
+            _keep_figure_on_one_line(figure_box, num, resolver=resolver)
             _set_run_text(label_box, label, claimed_ids, resolver=resolver)
     elif boxes:
         # Real decks often hold this kind of content as one text block next to
