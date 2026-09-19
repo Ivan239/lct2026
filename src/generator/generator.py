@@ -35,7 +35,8 @@ from generator.text_fit import (
     paragraph_pitch_pt,
     vertical_insets_emu,
 )
-from qa.geometry import (MIN_READABLE_PT, drop_needless_soft_hyphens, enforce_text_fits,
+from qa.geometry import (MIN_READABLE_PT, SIDE_ART_MIN_CLEAR_FRACTION,
+                         drop_needless_soft_hyphens, enforce_text_fits,
                          harmonize_clone_font_sizes, keep_text_clear_of_side_art,
                          keep_text_inside_slide, unglue_overwide_pairs)
 from qa.package_check import assert_valid_package
@@ -2082,7 +2083,7 @@ def _image_slot_pictures(slide):
 _SKELETON_GREY = RGBColor(0x88, 0x88, 0x88)
 
 
-def _replace_image_slot(slide, caption, style_run, margin_emu=0):
+def _replace_image_slot(slide, caption, style_run, margin_emu=0, title_shape=None):
     """Swap the template's sample picture(s) for the dashed image skeleton the
     synthesized image_caption slides draw — the honest marker of «your image
     goes here» — over the box they occupied. The font is copied from
@@ -2105,6 +2106,22 @@ def _replace_image_slot(slide, caption, style_run, margin_emu=0):
     top = max(min(int(p.top) for p in pictures), margin_emu)
     right = min(max(int(p.left + p.width) for p in pictures), width - margin_emu)
     bottom = min(max(int(p.top + p.height) for p in pictures), height - margin_emu)
+    # The designer's own picture may start INSIDE the title's box: VK Education
+    # 31 runs its screenshots from 3.8in under a 0.74-5.04in heading box, and
+    # that is fine while the heading is «Слайды со скриншотами» — short, one
+    # line, ending well before the artwork. Ours is a sentence, wraps to two
+    # lines and reaches the box edge, so the frame printed across it (iter145).
+    # The frame keeps clear of the heading BOX, the same line the designer's
+    # second picture keeps (5.14in against a box ending at 5.04in).
+    if title_shape is not None and title_shape.left is not None and title_shape.width:
+        title_right = int(title_shape.left + title_shape.width)
+        band_top, band_bottom = int(title_shape.top or 0), int((title_shape.top or 0)
+                                                               + (title_shape.height or 0))
+        overlaps_band = top < band_bottom and bottom > band_top
+        if overlaps_band and left < title_right < right:
+            clipped = title_right + margin_emu
+            if right - clipped >= SIDE_ART_MIN_CLEAR_FRACTION * (right - left):
+                left = clipped
     if right - left < int(Inches(1)) or bottom - top < int(Inches(1)):
         return None
     for picture in pictures:
@@ -2159,7 +2176,7 @@ def _fill_image_caption(slide, data, claimed_ids, resolver=None):
         style = next((r for p in title_shape.text_frame.paragraphs for r in p.runs), None)
     margin = int(title_shape.left) if title_shape is not None and title_shape.left else 0
     frame = _replace_image_slot(slide, None if caption_taken else description, style,
-                                margin_emu=margin)
+                                margin_emu=margin, title_shape=title_shape)
     if frame is not None:
         claimed_ids.add(frame.shape_id)
 
