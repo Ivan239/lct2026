@@ -181,7 +181,18 @@ def _enforce_outline_rules(outline, max_blocks=MAX_BLOCKS):
     # stats slide, no wrap-up, no call to action, while the brief explicitly
     # asked for one. Every presentation needs a last word, so make it a rule.
     # Trailing non-closing blocks stay; the closing is appended after them.
-    if not any(item["role"] == "closing" for item in result):
+    #
+    # And it ends ONCE, at the end. The model also returns a closing in the
+    # middle or two of them — the loop deck of iter103 ran image slide after
+    # «Спасибо», and the image insertion below appends after the last block
+    # when that block is not a closing. The last closing the model wrote is
+    # kept (it is the one written as the ending) and moved to the end; the
+    # blocks it stood before keep their order.
+    closings = [item for item in result if item["role"] == "closing"]
+    result = [item for item in result if item["role"] != "closing"]
+    if closings:
+        result.append(closings[-1])
+    else:
         result = result[:max_blocks - 1] if len(result) >= max_blocks else result
         result.append({"role": "closing", "theme": "итог и призыв к действию", "count": None})
 
