@@ -377,9 +377,18 @@ def _enable_autofit(shape):
 
 
 def _metrics_for_run(reference_run, resolver):
+    """Metrics of the face the run is actually SET in, bold included.
+
+    Cyrillic bold runs ~7% wider than the regular advances a family name
+    resolves to (CLAUDE.md), and every caller here — the one-line figure fit,
+    the slot budgets, the title — measured its bold text with regular metrics.
+    VK Tech's board printed «94» over «секунды»: the figure fitted «94 секунды»
+    at 31pt, which is 101.2% of that box's line, so the renderer wrapped it and
+    the template's 16% display leading laid the two lines on top of each other
+    (iter141)."""
     if resolver is None or reference_run is None:
         return None
-    return resolver.metrics_for(reference_run.font.name)
+    return resolver.metrics_for(reference_run.font.name, bold=bool(reference_run.font.bold))
 
 
 # Used only when the shape's own text has no explicit run-level size at all —
