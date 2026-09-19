@@ -16,7 +16,7 @@ import json
 import re
 
 from common.json_utils import extract_json
-from common.phrases import (DANGLING_TAIL_WORDS, cut_at_clause,
+from common.phrases import (DANGLING_TAIL_WORDS, cut_at_clause, cut_at_clause_chars,
                             drop_dangling_function_words)
 from common.model_fallback import TEXT_MODELS, call_with_model_fallback
 from common.synthesis import SYNTHESIZABLE_TYPES
@@ -363,7 +363,46 @@ def _guard_widow(text):
     return " ".join(words[:-1]) + " " + words[-1]
 
 
+# How far past its budget an item may stay whole: as far as the fitter can still
+# set it on the slot's line at its 70% font floor (plan 10г), i.e. 1 / 0.7.
+# 1.25 was tried first and left half of the iter129 cases cut: the model's
+# overruns run 30-40% («План развития на три месяца», 27 characters against 21).
+ITEM_KEEP_WHOLE_RATIO = 1.4
+
+
 def _trim_to_budget(item, max_chars):
+    """An over-long item: cut at a CLAUSE boundary within the budget; failing
+    that, kept whole while it is at most ITEM_KEEP_WHOLE_RATIO over; only past
+    that, cut at a clause boundary within that ceiling or — last resort — at a
+    word boundary within the budget, as before.
+
+    A word-boundary cut keeps the grammar of neither half: once the budget
+    stopped being one word (iter127) the model's 50-60 character items came
+    back as «Снижение текучести кадров среди», «Рост удовлетворённости
+    молодых», «Обратная связь каждые» — seven on one deck (iter129). Titles
+    are cut at clauses for the same reason (common.phrases.cut_at_clause); a
+    slightly smaller font is a lesser defect than a phrase that stops
+    mid-thought.
+
+    The word-boundary rule below it still guards the last resort:"""
+    if len(item) <= max_chars:
+        return item
+    clause = cut_at_clause_chars(item, max_chars)
+    if clause:
+        return clause
+    # Never past the flat cap: MAX_BULLET_CHARS is the limit for roomy boxes,
+    # where there is no slot line for the fitter to shrink onto.
+    ceiling = min(int(max_chars * ITEM_KEEP_WHOLE_RATIO), max(MAX_BULLET_CHARS, max_chars))
+    if len(item) <= ceiling:
+        return item
+    # Past the ceiling a word cut has to happen, and it goes at the BUDGET, not
+    # the ceiling: a longer cut is not a better one — at 35 characters «Ручной
+    # сбор показателей из семи независимых систем» came out «…из семи», a
+    # preposition and a numeral without their noun.
+    return cut_at_clause_chars(item, ceiling) or _trim_at_word(item, max_chars)
+
+
+def _trim_at_word(item, max_chars):
     """Cut an over-long item at a WORD boundary, or leave it alone.
 
     The old cut was `item[:max].rsplit(" ", 1)[0]`, which silently returns the

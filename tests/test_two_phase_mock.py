@@ -143,16 +143,19 @@ def test_a_word_ending_exactly_on_the_budget_is_kept():
     back to the previous one, and «Данные расходились» — 18 characters against a
     budget of 18 — shipped as «Данные». Seen on the render of the universal
     template's numbered grid, whose cells learn an 18-char budget from the
-    designer's own «Название пункта»."""
-    from content_parser.two_phase import _trim_to_budget
+    designer's own «Название пункта».
+
+    The slicing lives in the word-cut primitive; since iter129 _trim_to_budget
+    reaches it only past the keep-whole ceiling, so the edge is tested there."""
+    from content_parser.two_phase import _trim_at_word
 
     assert len("Данные расходились") == 18
-    assert _trim_to_budget("Данные расходились между системами", 18) == "Данные расходились"
+    assert _trim_at_word("Данные расходились между системами", 18) == "Данные расходились"
     # One character less and the boundary genuinely does not fit.
-    assert _trim_to_budget("Данные расходились между системами", 17) == "Данные"
+    assert _trim_at_word("Данные расходились между системами", 17) == "Данные"
     # The extra character is only ever used to SEE the boundary, never kept:
     # a word straddling the budget is still dropped whole.
-    assert _trim_to_budget("Данные расходились всюду", 19) == "Данные расходились"
+    assert _trim_at_word("Данные расходились всюду", 19) == "Данные расходились"
 
 
 def test_a_trimmed_bullet_does_not_end_on_a_preposition():

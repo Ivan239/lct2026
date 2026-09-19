@@ -17,6 +17,12 @@ DANGLING_TAIL_WORDS = {
     "в", "во", "на", "за", "по", "из", "изо", "с", "со", "к", "ко", "у", "о",
     "об", "обо", "от", "до", "для", "при", "про", "над", "под", "перед", "без",
     "через", "между", "около", "после", "не", "ни",
+    "среди", "против", "кроме", "вместо", "вокруг", "внутри",
+    # Words that only ever stand BEFORE their noun: a phrase ending on one has
+    # lost that noun — «Обратная связь каждые», «План развития на три» (iter129).
+    "каждый", "каждая", "каждое", "каждые", "каждого", "каждую", "каждых",
+    "весь", "вся", "все", "всех", "несколько", "много", "многих",
+    "два", "две", "три", "четыре", "пять", "шесть", "семь", "восемь", "девять", "десять",
 }
 
 
@@ -31,6 +37,22 @@ def drop_dangling_function_words(text):
 # Words that open a new clause: cutting BEFORE one leaves a phrase that ends on
 # its own terms.
 CLAUSE_OPENERS = {"и", "а", "но", "или", "чтобы", "потому", "поэтому", "однако", "либо"}
+
+
+def cut_at_clause_chars(text, max_chars):
+    """`text` cut at the LATEST clause boundary within max_chars characters, or
+    None when there is none. Same boundaries as cut_at_clause: before a clause
+    opener, after a comma or a dash."""
+    words = text.split()
+    best = None
+    for i in range(1, len(words)):
+        stripped = words[i].lower().strip(".,;:—-")
+        ends_clause = words[i - 1].endswith(",") or words[i - 1].endswith("—")
+        if stripped in CLAUSE_OPENERS or ends_clause:
+            cut = drop_dangling_function_words(" ".join(words[:i]).rstrip(".,;:—- "))
+            if cut and len(cut) <= max_chars:
+                best = cut
+    return best
 
 
 def cut_at_clause(text, max_words):
