@@ -42,6 +42,7 @@ from template_parser.parser import extract_template, extract_theme
 # Shared with synthesizer via slide_kit (plan 9.3); private aliases keep the
 # many existing call sites and tests stable.
 from generator.slide_kit import (
+    content_groups,
     content_text_shapes as _content_text_shapes,
     slide_height as _slide_height,
     slide_width as _slide_width,
@@ -1184,11 +1185,110 @@ def _fill_list_slots(slide, slots, texts, claimed_ids, resolver=None):
         surplus._element.getparent().remove(surplus._element)
 
 
+def _group_texts(group):
+    """Text shapes inside a group, groups opened, top to bottom in the group's
+    own space."""
+    found = []
+
+    def walk(g):
+        for child in g.shapes:
+            if child.shape_type == MSO_SHAPE_TYPE.GROUP:
+                walk(child)
+            elif getattr(child, "has_text_frame", False) and child.text_frame.text.strip():
+                found.append(child)
+
+    walk(group)
+    return sorted(found, key=lambda s: (int(s.top or 0), int(s.left or 0)))
+
+
+def _find_group_slots(slide, claimed_ids):
+    """A GRID of >=3 same-size content GROUPS — cards — as list slots, in
+    reading order, or [].
+
+    VK Tech keeps each card of its four-card slide as a group (icon +
+    «Заголовок / Подзаголовок / Текст» and more «Текст»). The native list
+    filler reads only the top level of slide.shapes, so it saw one text box —
+    the title's — wrote every bullet into it at 7pt, lost the title and left
+    28 placeholder strings in the cards (iter120). Same grid test as
+    _find_slot_boxes, on the groups' own boxes."""
+    groups = [g for g in content_groups(slide) if g.shape_id not in claimed_ids
+              and g.width and g.height]
+    by_size = {}
+    for g in groups:
+        key = (int(g.width // _SLOT_ALIGN_TOLERANCE_EMU), int(g.height // _SLOT_ALIGN_TOLERANCE_EMU))
+        by_size.setdefault(key, []).append(g)
+    best = []
+    for same in by_size.values():
+        if len(same) < _MIN_SLOT_BOXES or len(same) <= len(best):
+            continue
+        xs = _uniform_axis([g.left for g in same])
+        ys = _uniform_axis([g.top for g in same])
+        if xs is None or ys is None or len(same) != len(xs) * len(ys):
+            continue
+        best = sorted(same, key=lambda g: (int(g.top // _SLOT_ALIGN_TOLERANCE_EMU),
+                                           int(g.left // _SLOT_ALIGN_TOLERANCE_EMU)))
+    return best
+
+
+def _fill_group_slots(slide, groups, texts, claimed_ids, resolver=None):
+    """One item per card: into the card's first text box; the card's other
+    text boxes go (a blanked box keeps its bullet glyphs and holds space), the
+    card's icon and backing stay. Surplus cards are removed whole."""
+    filled = []
+    for group, text in zip(groups, texts):
+        inner = _group_texts(group)
+        if not inner:
+            continue
+        _set_run_text(inner[0], text, claimed_ids, resolver=resolver)
+        filled.append(inner[0])
+        for other in inner[1:]:
+            # The markers beside a removed line (the cards' grey squares are
+            # shapes of their own) go with it, as _slot_markers does for slots.
+            for marker in _group_markers(group, other):
+                marker._element.getparent().remove(marker._element)
+            other._element.getparent().remove(other._element)
+    for surplus in groups[len(texts):]:
+        surplus._element.getparent().remove(surplus._element)
+    # One size across the cards: each box is fitted to its own text, and a
+    # longer item came out a size smaller than its neighbours.
+    sizes = [_max_font_pt(box) for box in filled if _max_font_pt(box)]
+    if len(sizes) > 1 and min(sizes) < max(sizes):
+        for box in filled:
+            for paragraph in box.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    run.font.size = Pt(min(sizes))
+
+
+def _group_markers(group, box):
+    """Small non-text shapes of the group in `box`'s row band, left of it —
+    the list-marker glyphs of a card line (group space throughout)."""
+    center_band = (int(box.top or 0) - _SLOT_ALIGN_TOLERANCE_EMU,
+                   int((box.top or 0) + (box.height or 0)) + _SLOT_ALIGN_TOLERANCE_EMU)
+    found = []
+    for child in group.shapes:
+        if child.shape_id == box.shape_id or child.left is None or not child.width:
+            continue
+        if getattr(child, "has_text_frame", False) and child.text_frame.text.strip():
+            continue
+        if child.width > _MARKER_MAX_SIZE_EMU or child.height > _MARKER_MAX_SIZE_EMU:
+            continue
+        center = int(child.top) + int(child.height) // 2
+        if int(child.left) < int(box.left or 0) and center_band[0] <= center <= center_band[1]:
+            found.append(child)
+    return found
+
+
 def _fill_bullet_list(slide, data, claimed_ids, resolver=None):
     bullets = data.get("bullets", [])
     slots = _find_slot_boxes(slide, claimed_ids)
     if slots:
         _fill_list_slots(slide, slots, bullets, claimed_ids, resolver=resolver)
+        title_shape = _pick_title_shape(slide, claimed_ids)
+        _set_run_text(title_shape, data.get("title", ""), claimed_ids, resolver=resolver)
+        return
+    cards = _find_group_slots(slide, claimed_ids)
+    if cards:
+        _fill_group_slots(slide, cards, bullets, claimed_ids, resolver=resolver)
         title_shape = _pick_title_shape(slide, claimed_ids)
         _set_run_text(title_shape, data.get("title", ""), claimed_ids, resolver=resolver)
         return
@@ -1615,6 +1715,9 @@ def get_capacity(slide, archetype):
         slots = _find_slot_boxes(slide, claimed_ids)
         if slots:
             return len(slots)
+        cards = _find_group_slots(slide, claimed_ids)
+        if cards:
+            return len(cards)
         body_shape = _pick_body_shape(slide, claimed_ids)
         if body_shape is None:
             return None
