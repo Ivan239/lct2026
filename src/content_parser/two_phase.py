@@ -29,14 +29,24 @@ OUTLINE_ROLES = [
 
 MAX_SECTION_DIVIDERS = 1
 MAX_IMAGE_SLIDES = 1
-MAX_BLOCKS = 10
+
+# Deck size from the VK Tech brief: 10-15 slides, or the number the user asks
+# for (a content package's `slides`). The outline prompt used to ask for 5-9
+# blocks under a hard cap of 10, so every loop deck came out 8-9 slides — under
+# the brief's floor on every run.
+DECK_MIN_SLIDES = 10
+DECK_MAX_SLIDES = 15
+MAX_BLOCKS = DECK_MAX_SLIDES
 
 OUTLINE_PROMPT = """Ты планируешь структуру презентации по брифу.
 
 В шаблоне презентации доступны такие виды слайдов:
 __MENU__
 
-Разбей бриф на 5-9 блоков. Для каждого блока укажи:
+Разбей бриф на __RANGE__ блоков (слайдов, включая титульный и финальный).
+Если материала мало — раскрой его подробнее (отдельный слайд на проблему,
+решение, каждую ключевую возможность, результаты, план), а не сокращай.
+Для каждого блока укажи:
 - "role" — один из: __ROLES__
 - "theme" — тема блока, 3-7 слов (о чём конкретно этот слайд)
 - "count" — сколько пунктов/цифр планируется (для bullet_list и stats_kpi;
@@ -147,12 +157,12 @@ def _validate_outline(outline):
     return outline
 
 
-def _enforce_outline_rules(outline):
+def _enforce_outline_rules(outline, max_blocks=MAX_BLOCKS):
     """Hard rules the model has demonstrably ignored when merely asked."""
     result = []
     dividers = 0
     images = 0
-    for item in outline[:MAX_BLOCKS]:
+    for item in outline[:max_blocks]:
         if item["role"] == "section_divider":
             dividers += 1
             if dividers > MAX_SECTION_DIVIDERS:
@@ -171,14 +181,14 @@ def _enforce_outline_rules(outline):
     # asked for one. Every presentation needs a last word, so make it a rule.
     # Trailing non-closing blocks stay; the closing is appended after them.
     if not any(item["role"] == "closing" for item in result):
-        result = result[:MAX_BLOCKS - 1] if len(result) >= MAX_BLOCKS else result
+        result = result[:max_blocks - 1] if len(result) >= max_blocks else result
         result.append({"role": "closing", "theme": "итог и призыв к действию", "count": None})
 
     # Asking for an image slide "where a visual helps" gets one only about half
     # the time — same lesson as the divider cap: state it as a rule, enforce it
     # in code. Placed just before the closing (a visual right before the CTA),
-    # and only when there's room under MAX_BLOCKS.
-    if images == 0 and len(result) < MAX_BLOCKS:
+    # and only when there's room under max_blocks.
+    if images == 0 and len(result) < max_blocks:
         # Theme wording matters twice over: the model ECHOES it into the title,
         # and a vague one starves the block. "визуальная иллюстрация продукта"
         # produced a generic "Продукт X — визуализация"; a concrete, natural
@@ -192,7 +202,24 @@ def _enforce_outline_rules(outline):
     return result
 
 
-def generate_outline(client, brief, spec, models=TEXT_MODELS, style_preamble=""):
+def deck_size_bounds(slides=None):
+    """(min, max) slides: exactly `slides` when the user asked for a number,
+    the brief's 10-15 otherwise."""
+    if slides:
+        return int(slides), int(slides)
+    return DECK_MIN_SLIDES, DECK_MAX_SLIDES
+
+
+def generate_outline(client, brief, spec, models=TEXT_MODELS, style_preamble="", slides=None):
+    """Outline of `slides` blocks when given (a content package's `slides`),
+    DECK_MIN_SLIDES..DECK_MAX_SLIDES otherwise.
+
+    The upper bound is code-enforced like every other hard rule. The lower one
+    cannot be — code has no themes to invent — so a short outline gets ONE
+    corrective call saying how many blocks came back and how many are needed,
+    and the longer of the two is kept. Never a failure: a deck one slide short
+    is better than no deck (iter113 lost a whole run to one malformed block)."""
+    low, high = deck_size_bounds(slides)
     menu = describe_for_prompt(spec, SYNTHESIZABLE_TYPES)
     if style_preamble:
         # Template design brief (plan 9.4) — advice for tone/length; every
@@ -202,15 +229,30 @@ def generate_outline(client, brief, spec, models=TEXT_MODELS, style_preamble="")
         OUTLINE_PROMPT
         .replace("__MENU__", menu)
         .replace("__ROLES__", ", ".join(OUTLINE_ROLES))
+        .replace("__RANGE__", f"РОВНО {low}" if low == high else f"{low}-{high}")
         .replace("__BRIEF__", brief)
     )
 
-    def call(model):
-        result = client.chat([{"role": "user", "content": prompt}], model=model, max_tokens=1200)
-        return _validate_outline(extract_json(result["choices"][0]["message"]["content"]))
+    def make_call(text):
+        def call(model):
+            result = client.chat([{"role": "user", "content": text}], model=model, max_tokens=1600)
+            return _validate_outline(extract_json(result["choices"][0]["message"]["content"]))
+        return call
 
-    outline = call_with_model_fallback(call, models)
-    return _enforce_outline_rules(outline)
+    outline = _enforce_outline_rules(call_with_model_fallback(make_call(prompt), models),
+                                     max_blocks=high)
+    if len(outline) < low:
+        note = (f"\n\nВ прошлом ответе было {len(outline)} блоков, а нужно "
+                f"{'ровно ' + str(low) if low == high else f'от {low} до {high}'}. "
+                "Раскрой бриф подробнее и ответь полным списком блоков.")
+        try:
+            longer = _enforce_outline_rules(
+                call_with_model_fallback(make_call(prompt + note), models), max_blocks=high)
+            if len(longer) > len(outline):
+                outline = longer
+        except Exception:  # noqa: BLE001 — the first outline stands
+            pass
+    return outline
 
 
 # A KPI figure is a number plus at most a short unit: "+25%", "-30 часов",

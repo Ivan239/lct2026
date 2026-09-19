@@ -148,19 +148,20 @@ CANONICAL_BRIEF = (
 
 
 def _resolve_content(args, rotated_package):
-    """(brief, source_numbers, label). A package gives the labelled brief and its
-    own numbers as the reference; a plain brief is its own reference."""
+    """(brief, source_numbers, label, slides). A package gives the labelled
+    brief, its own numbers as the reference and the deck size it asks for; a
+    plain brief is its own reference and gets the brief's 10-15 slides."""
     if args.brief_file:
         with open(args.brief_file, encoding="utf-8") as f:
             brief = f.read().strip()
-        return brief, extract_numbers(brief), f"бриф {os.path.basename(args.brief_file)}"
+        return brief, extract_numbers(brief), f"бриф {os.path.basename(args.brief_file)}", None
     if args.content == "canonical" or (args.content == "auto" and not rotated_package):
-        return CANONICAL_BRIEF, extract_numbers(CANONICAL_BRIEF), "канонический бриф"
+        return CANONICAL_BRIEF, extract_numbers(CANONICAL_BRIEF), "канонический бриф", None
     path = (os.path.join(PACKAGES_DIR, rotated_package) if args.content == "auto"
             else args.content)
     package = load_package(path)
     label = f"пакет {os.path.basename(os.path.normpath(path))} ({package['purpose_label'] or '—'})"
-    return to_brief_text(package), package["numbers"], label
+    return to_brief_text(package), package["numbers"], label, package["slides"]
 
 
 def main():
@@ -178,7 +179,7 @@ def main():
     args = ap.parse_args()
 
     rotated_model, rotated_template, rotated_package = _next_from_rotation()
-    brief, source_numbers, content_label = _resolve_content(args, rotated_package)
+    brief, source_numbers, content_label, slides = _resolve_content(args, rotated_package)
     requested = rotated_model if args.model == "auto" else args.model
     source = _resolve_source(args.source) or os.path.join(TEMPLATES_DIR, f"{rotated_template}.pptx")
     try:
@@ -192,12 +193,13 @@ def main():
     source_name = os.path.splitext(os.path.basename(source))[0]
     print(f"[loop] model={model_name} source={source_name} content={content_label}", flush=True)
     result = run_iteration(gen_client, model_name, source, brief, source_name=source_name,
-                           source_numbers=source_numbers)
+                           source_numbers=source_numbers, slides=slides)
     result["content"] = content_label
 
     ev = result["evaluation"]
     print("\n" + format_report(ev))
-    print(f"\nSlides: {result['n_slides']}  Skipped: {len(result['skipped'])}")
+    asked = f"заказано {slides}" if slides else "по ТЗ 10–15"
+    print(f"\nSlides: {result['n_slides']} ({asked})  Skipped: {len(result['skipped'])}")
     secs = result.get("deck_seconds")
     if secs is not None:
         # The VK Tech brief: one deck in at most 5 minutes.

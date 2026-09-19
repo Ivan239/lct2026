@@ -242,12 +242,14 @@ def _gen_models(model):
     return [model, net]
 
 
-def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_pptx, profile=None):
+def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_pptx, profile=None,
+                  slides=None):
     """Two-phase generation under one model (with a validation-failure safety net,
     see _gen_models). Returns (plan, skipped) — plan is [(block, slide_idx)], its
     order is the final slide order."""
     models = _gen_models(model)
-    outline = generate_outline(client, brief, spec, models=models, style_preamble=style_preamble)
+    outline = generate_outline(client, brief, spec, models=models, style_preamble=style_preamble,
+                               slides=slides)
     assignments, skipped_items = plan_from_outline(outline, spec)
     plan = []
     # Blocks are generated one call at a time and can't see each other — carry the
@@ -275,7 +277,7 @@ def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_p
 
 
 def run_iteration(client, model, source_pptx, brief, source_name=None, out_root=LOOP_ROOT,
-                  source_numbers=None):
+                  source_numbers=None, slides=None):
     """Full turn for one model. `client` parses the template and generates the
     deck. Scoring is deterministic-only here (no LLM judge call, ever — Claude
     reviews the renders and calls evaluation.claude_review.apply_claude_scores
@@ -287,7 +289,8 @@ def run_iteration(client, model, source_pptx, brief, source_name=None, out_root=
 
     `source_numbers` — a content package's `numbers`, the reference for
     «все цифры есть в исходных материалах»; None means the brief is the whole
-    source."""
+    source. `slides` — the deck size the package asks for; None means the
+    brief's 10-15."""
     source_name = source_name or os.path.splitext(os.path.basename(source_pptx))[0]
     t = ensure_template(client, model, source_pptx, source_name, out_root=out_root)
 
@@ -298,7 +301,8 @@ def run_iteration(client, model, source_pptx, brief, source_name=None, out_root=
     # three templates) is a one-off cost that would otherwise hide inside it.
     started = time.monotonic()
     plan, skipped = generate_deck(client, model, source_pptx, t["spec"], brief,
-                                  t["style_preamble"], out_pptx, profile=t["profile"])
+                                  t["style_preamble"], out_pptx, profile=t["profile"],
+                                  slides=slides)
     deck_seconds = round(time.monotonic() - started, 1)
     slide_roles = {pos: block["type"] for pos, (block, _) in enumerate(plan)}
 

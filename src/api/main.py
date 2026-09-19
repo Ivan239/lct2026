@@ -254,6 +254,8 @@ class GenerateRequest(BaseModel):
     template_id: str
     brief: str
     model: str | None = None
+    # Deck size the user asks for; None means the brief's 10-15 slides.
+    slides: int | None = None
 
 
 @app.get("/api/models")
@@ -435,7 +437,7 @@ def _synth_canvas_hints(template_id, plan):
         return {}
 
 
-def _plan_two_phase(template_id, brief, model=None):
+def _plan_two_phase(template_id, brief, model=None, slides=None):
     """Slot-first flow (docs/IMPROVEMENT_PLAN.md item 4): outline against the
     template's actual offering, pick concrete slides, then generate each block's
     text sized to the chosen slide's real capacity. Returns (plan, skipped), or
@@ -447,7 +449,8 @@ def _plan_two_phase(template_id, brief, model=None):
         # Template design brief (plan 9.4) — cached at upload, advisory only.
         style_preamble = card_prompt_preamble(load_card(PARSED_DIR, template_id))
         _set_progress("Планируем структуру презентации")
-        outline = generate_outline(client, brief, spec, models=models, style_preamble=style_preamble)
+        outline = generate_outline(client, brief, spec, models=models, style_preamble=style_preamble,
+                                   slides=slides)
         assignments, skipped_items = plan_from_outline(outline, spec)
 
         plan = []
@@ -512,7 +515,7 @@ def get_progress():
 
 @app.post("/api/generate")
 def generate_presentation(req: GenerateRequest):
-    return _generate_deck(req.template_id, req.brief, req.model)
+    return _generate_deck(req.template_id, req.brief, req.model, slides=req.slides)
 
 
 @app.post("/api/generate/package")
@@ -538,7 +541,7 @@ def generate_from_package(template_id: str = Form(...), file: UploadFile = File(
         except ContentPackageError as e:
             raise HTTPException(status_code=422, detail=f"Контент-пакет: {e}")
         result = _generate_deck(template_id, to_brief_text(package), model,
-                                source_numbers=package["numbers"])
+                                source_numbers=package["numbers"], slides=package["slides"])
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
     result["package"] = {
@@ -564,7 +567,7 @@ def _numbers_warnings(pptx_path, source_numbers):
             for number, tokens in sorted(by_slide.items())]
 
 
-def _generate_deck(template_id, brief, model=None, source_numbers=None):
+def _generate_deck(template_id, brief, model=None, source_numbers=None, slides=None):
     """Plan → .pptx → previews → warnings. `source_numbers` — the content
     package's numbers; None means the brief is the whole source."""
     if template_id not in _template_registry:
@@ -574,7 +577,7 @@ def _generate_deck(template_id, brief, model=None, source_numbers=None):
     template_path = os.path.join(TEMPLATES_DIR, f"{template_id}.pptx")
 
     try:
-        plan, skipped = _plan_two_phase(template_id, brief, model=model)
+        plan, skipped = _plan_two_phase(template_id, brief, model=model, slides=slides)
         if plan is None:
             _set_progress("Разбираем бриф (запасной сценарий)")
             plan, skipped = _plan_legacy(brief, archetype_map, template_path, model=model)

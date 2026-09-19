@@ -51,8 +51,9 @@ def stubbed(monkeypatch, tmp_path):
     seen = {}
     fact = next(f for f in load_package(PACKAGE)["facts"] if any(c.isdigit() for c in f))
 
-    def plan(template_id, brief, model=None):
+    def plan(template_id, brief, model=None, slides=None):
         seen["brief"] = brief
+        seen["slides"] = slides
         return [({"type": "title", "title": "Умный поиск", "subtitle": "Питч фичи"}, SYNTHESIZE),
                 ({"type": "bullet_list", "title": "Что даёт поиск",
                   "bullets": [fact, "Выручка выросла на 777%"]}, SYNTHESIZE)], []
@@ -85,6 +86,7 @@ def test_a_package_reaches_the_planner_and_its_numbers_audit_the_deck(stubbed):
 
     assert "Факты (используй только их" in stubbed["brief"]
     assert stubbed["fact"] in stubbed["brief"]
+    assert stubbed["slides"] == load_package(PACKAGE)["slides"], "the package's deck size is lost"
     assert result["package"]["facts"] > 0 and result["package"]["tables"]
 
     flagged = [w for w in result["warnings"] if w["kind"] == "numbers_not_in_source"]

@@ -42,7 +42,8 @@ def test_outline_retries_malformed_json_then_succeeds():
         {"role": "bullet_list", "theme": "проблемы", "count": 4},
     ])
     client = FakeClient(["это не json {", good])
-    outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"])
+    # slides=4: this test is about the JSON retry, not the deck size
+    outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"], slides=4)
     assert client.calls == 2
     # image_caption and the final closing are both enforced in code
     # (_enforce_outline_rules), not something the model was asked for here
@@ -228,3 +229,46 @@ def test_the_slot_char_budget_reaches_the_model(monkeypatch, tmp_path):
     assert "до 28 символов" in list_prompts[0], (
         "the slot's own budget did not reach the prompt: "
         + next((l for l in list_prompts[0].splitlines() if "символов" in l), "?"))
+
+
+class RecordingClient(FakeClient):
+    def __init__(self, responses):
+        super().__init__(responses)
+        self.prompts = []
+
+    def chat(self, messages, model=None, **kwargs):
+        self.prompts.append(messages[-1]["content"])
+        return super().chat(messages, model=model, **kwargs)
+
+
+def _outline(n):
+    return json.dumps([{"role": "title", "theme": "т", "count": None}]
+                      + [{"role": "bullet_list", "theme": f"б{i}", "count": 3} for i in range(n - 2)]
+                      + [{"role": "closing", "theme": "итог", "count": None}])
+
+
+def test_a_short_outline_gets_one_corrective_call_with_the_count():
+    """The brief's floor is 10 slides; the prompt used to ask for 5-9 and every
+    loop deck came out 8-9. A short outline is sent back once, saying how many
+    blocks came and how many are needed; the longer one is kept."""
+    client = RecordingClient([_outline(6), _outline(11)])
+    outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"])
+    assert client.calls == 2
+    assert "10-15" in client.prompts[0]
+    assert "было 7 блоков" in client.prompts[1] and "от 10 до 15" in client.prompts[1]
+    assert 10 <= len(outline) <= 15
+
+
+def test_a_failed_correction_keeps_the_first_outline_instead_of_failing():
+    """No deck at all is worse than a short one (iter113 lost a whole run to
+    one malformed block)."""
+    client = RecordingClient([_outline(6)])          # the corrective call finds nothing
+    outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"])
+    assert len(outline) == 7                          # 6 + the enforced image slide
+
+
+def test_an_asked_size_is_exact_and_the_cap_follows_it():
+    client = RecordingClient([_outline(14)])
+    outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"], slides=12)
+    assert "РОВНО 12" in client.prompts[0]
+    assert len(outline) == 12 and outline[-1]["role"] == "closing"

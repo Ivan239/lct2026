@@ -41,12 +41,14 @@ def test_every_template_slot_sees_every_package(tmp_path, monkeypatch):
 def test_a_package_brings_its_facts_and_its_numbers(tmp_path):
     args = argparse.Namespace(content="auto", brief_file=None)
     package = loop._packages()[0]
-    brief, numbers, label = loop._resolve_content(args, package)
+    brief, numbers, label, slides = loop._resolve_content(args, package)
     assert "Факты (используй только их" in brief
     assert numbers and package in label
+    assert slides, "the package's deck size must reach the loop"
 
 
 def test_the_canonical_brief_is_still_available_and_has_no_numbers():
     args = argparse.Namespace(content="canonical", brief_file=None)
-    brief, numbers, label = loop._resolve_content(args, "anything")
+    brief, numbers, label, slides = loop._resolve_content(args, "anything")
     assert brief == loop.CANONICAL_BRIEF and numbers == [] and "канонический" in label
+    assert slides is None
