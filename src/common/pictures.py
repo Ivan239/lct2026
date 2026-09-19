@@ -26,6 +26,7 @@ from collections import Counter
 import hashlib
 
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+from pptx.util import Inches
 
 OVERSIZED_PICTURE_AREA_RATIO = 0.12
 
@@ -157,6 +158,59 @@ def has_oversized_picture(slide, slide_width, slide_height):
     return False
 
 
+# A chart drawn with SHAPES: a row of bars is a run of same-thickness shapes
+# whose lengths differ. Measured over the corpus: 11 slides, all VK Tech (its
+# funnel, its Gantt chart, its dot-and-bar decorations) and zero on the other
+# twelve templates — card grids do not match, their cards are equal in both
+# dimensions.
+SHAPE_CHART_MIN_BARS = 4
+SHAPE_CHART_MIN_LENGTHS = 3
+SHAPE_CHART_THICKNESS_TOLERANCE_EMU = int(Inches(0.04))
+
+
+def has_shape_chart(slide):
+    """True when the slide's «infographic» is a chart built out of shapes.
+
+    Its bars carry the designer's numbers in their LENGTHS, and nothing resizes
+    them (backlog item 5): VK Tech's funnel shipped as «до и после пилота» with
+    our labels beside bars that mean nothing, and its Gantt chart shipped as a
+    KPI board — «-5 недель» and «1,3 млн ₽» against bars of the designer's own
+    proportions, one bar without a label at all (iter141, iter144). Like a
+    table or a flowchart, such a slide is not offered until we can draw one."""
+    def walk(shapes):
+        for shape in shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                yield from walk(shape.shapes)
+            else:
+                yield shape
+
+    plain = [s for s in walk(slide.shapes)
+             if s.width and s.height and s.left is not None and s.top is not None
+             and not (s.has_text_frame and s.text_frame.text.strip())]
+    # Horizontal bars only. The vertical reading (equal width, varying height)
+    # was measured and dropped inside this iteration: on the corpus it found no
+    # chart of its own and one false positive — VK Tech 54's product cards, four
+    # illustrations 1.69in wide and 1.54-2.26in tall, on a perfectly good list
+    # slide. All three real cases (VK Tech's funnel and Gantt, VK Education's
+    # «Диаграмма Ганта») are rows of bars.
+    groups = []
+    for shape in plain:
+        for group in groups:
+            if abs(int(group[0].height) - int(shape.height)) <= SHAPE_CHART_THICKNESS_TOLERANCE_EMU:
+                group.append(shape)
+                break
+        else:
+            groups.append([shape])
+    for group in groups:
+        if len(group) < SHAPE_CHART_MIN_BARS:
+            continue
+        lengths = {round(int(s.width) / 914400, 2) for s in group}
+        rows = {int(s.top) for s in group}
+        if len(lengths) >= SHAPE_CHART_MIN_LENGTHS and len(rows) >= SHAPE_CHART_MIN_BARS - 1:
+            return True
+    return False
+
+
 def has_data_object(slide):
     """True when the slide carries a native TABLE or CHART — the designer's
     sample data in its most literal form.
@@ -179,7 +233,7 @@ def has_data_object(slide):
                 return True
         return False
 
-    return walk(slide.shapes) or has_connector_diagram(slide)
+    return walk(slide.shapes) or has_connector_diagram(slide) or has_shape_chart(slide)
 
 
 # A flowchart is a graph: many connectors, several of them arrows. Measured over
