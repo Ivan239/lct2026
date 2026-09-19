@@ -1,0 +1,67 @@
+@use '@/shared/styles/variables' as v;
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: v.$space-3;
+  flex-wrap: wrap;
+  margin-top: v.$space-2;
+}
+
+.pick {
+  padding: v.$space-2 v.$space-3;
+  border: 1px dashed v.$color-border;
+  border-radius: v.$radius-sm;
+  background: transparent;
+  color: v.$color-navy;
+  font-size: 14px;
+  cursor: pointer;
+
+  &:hover:not(:disabled) {
+    border-color: v.$color-navy-light;
+  }
+
+  &:disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+}
+
+.chosen {
+  display: flex;
+  align-items: center;
+  gap: v.$space-2;
+  padding: v.$space-1 v.$space-2 v.$space-1 v.$space-1;
+  border: 1px solid v.$color-orange;
+  border-radius: v.$radius-sm;
+  background: rgba(240, 140, 40, 0.06);
+  font-size: 14px;
+}
+
+.badge {
+  font-size: 12px;
+  color: v.$color-orange;
+  background: rgba(240, 140, 40, 0.12);
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+.fileName {
+  color: v.$color-text;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+.clear {
+  border: none;
+  background: transparent;
+  color: v.$color-text-muted;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.hint {
+  font-size: 12px;
+  color: v.$color-text-muted;
+}

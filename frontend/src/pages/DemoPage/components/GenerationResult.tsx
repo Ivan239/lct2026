@@ -14,6 +14,14 @@ export function GenerationResult({ result }: { result: GenerateResponse }) {
         </a>
       </div>
 
+      {result.package && (
+        <p className={styles.packageLine}>
+          По контент-пакету «{result.package.title ?? 'без названия'}»: фактов {result.package.facts},
+          цифр для сверки {result.package.numbers}
+          {result.package.tables.length > 0 && <>, таблицы: {result.package.tables.join(', ')}</>}
+        </p>
+      )}
+
       <ol className={styles.plan}>
         {result.plan.map((item, i) => (
           <li key={i}>

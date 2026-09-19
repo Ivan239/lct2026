@@ -60,3 +60,18 @@ export function generatePresentation(
     body: JSON.stringify({ template_id: templateId, brief, model: model || null }),
   })
 }
+
+/** Generation from a content package: a .zip of brief.md (+ package.json,
+ * facts.md, data/*.csv, images/*). The deck's numbers are checked against the
+ * package's; mismatches come back in `warnings`. */
+export function generateFromPackage(
+  templateId: string,
+  file: File,
+  model?: string | null,
+): Promise<GenerateResponse> {
+  const form = new FormData()
+  form.append('template_id', templateId)
+  form.append('file', file)
+  if (model) form.append('model', model)
+  return request('/api/generate/package', { method: 'POST', body: form })
+}

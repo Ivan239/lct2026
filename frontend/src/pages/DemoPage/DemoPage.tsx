@@ -9,12 +9,14 @@ import {
   fetchBalance,
   fetchProgress,
   fetchTemplates,
+  generateFromPackage,
   generatePresentation,
   uploadTemplate,
 } from '@/shared/api/client'
 import type { BalanceEntry, GenerateResponse, TemplateSummary } from '@/shared/api/types'
 import { TemplatePicker } from './components/TemplatePicker'
 import { BriefEditor } from './components/BriefEditor'
+import { PackageInput } from './components/PackageInput'
 import { GenerationResult } from './components/GenerationResult'
 import { EXAMPLE_BRIEF } from './exampleBrief'
 import styles from './DemoPage.module.scss'
@@ -50,6 +52,7 @@ export function DemoPage() {
   const [templates, setTemplates] = useState<TemplateSummary[]>([])
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [brief, setBrief] = useState(EXAMPLE_BRIEF)
+  const [packageFile, setPackageFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [result, setResult] = useState<GenerateResponse | null>(null)
@@ -107,7 +110,9 @@ export function DemoPage() {
     setResult(null)
     const poll = startProgressPolling(setProgressLabel, 'Собираем презентацию...')
     try {
-      const response = await generatePresentation(selectedId, brief, generateModel)
+      const response = packageFile
+        ? await generateFromPackage(selectedId, packageFile, generateModel)
+        : await generatePresentation(selectedId, brief, generateModel)
       setResult(response)
       if (response.balance) setBalance(response.balance)
     } catch (e) {
@@ -144,7 +149,10 @@ export function DemoPage() {
 
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>2. Опишите продукт</h2>
-          <BriefEditor value={brief} onChange={setBrief} />
+          <div className={packageFile ? styles.briefDisabled : undefined}>
+            <BriefEditor value={brief} onChange={setBrief} disabled={packageFile !== null} />
+          </div>
+          <PackageInput file={packageFile} onChange={setPackageFile} disabled={generating} />
         </section>
 
         <div className={styles.generateRow}>

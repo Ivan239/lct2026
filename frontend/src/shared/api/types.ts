@@ -41,6 +41,16 @@ export interface GenerationWarning {
   details: string
 }
 
+/** What the service read from a content package (docs/CONTENT_PACKAGE.md). */
+export interface PackageSummary {
+  title: string | null
+  purpose: string | null
+  facts: number
+  numbers: number
+  tables: string[]
+  images: number
+}
+
 export interface GenerateResponse {
   generation_id: string
   download_url: string
@@ -49,4 +59,5 @@ export interface GenerateResponse {
   skipped: SkippedItem[]
   warnings?: GenerationWarning[]
   balance?: BalanceEntry[] | null
+  package?: PackageSummary
 }
