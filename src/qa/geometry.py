@@ -313,6 +313,45 @@ def keep_text_inside_slide(prs, resolver, slide_indices=None):
     return changed
 
 
+NBSP = "\u00a0"
+
+
+def unglue_overwide_pairs(prs, resolver, slide_indices=None):
+    """Replace a non-breaking space with a plain one where the glued pair is
+    wider than its box's line at the final size.
+
+    two_phase._guard_widow glues an item's last two words so a wrap cannot
+    strand the last one — right while the pair fits a line. In a narrow
+    multi-line slot it does not: «дополнительных сервера» on VK Tech's 1.77in
+    card heading rendered «дополнительных с/ервера», «утверждает бюдже/т»
+    (iter139). The fitter never saw it, since str.split() splits at U+00A0 as
+    well; the renderer does not. Glue that cannot fit is worse than a widow."""
+    changed = []
+    indices = range(len(prs.slides._sldIdLst)) if slide_indices is None else slide_indices
+    for slide_idx in indices:
+        slide = prs.slides[slide_idx]
+        for shape in slide.shapes:
+            if not shape.has_text_frame or not shape.width or NBSP not in shape.text_frame.text:
+                continue
+            usable_pt = (Emu(shape.width).inches - horizontal_margins_in(shape)) * 72
+            for para in shape.text_frame.paragraphs:
+                for run in para.runs:
+                    if NBSP not in run.text or not run.font.size:
+                        continue
+                    metrics = resolver.metrics_for(run.font.name, bold=bool(run.font.bold)) \
+                        if run.font.name else None
+                    if metrics is None:
+                        continue
+                    tokens = run.text.split(" ")
+                    fixed = [t.replace(NBSP, " ") if NBSP in t and
+                             metrics.text_width_pt(t, run.font.size.pt) > usable_pt else t
+                             for t in tokens]
+                    if fixed != tokens:
+                        run.text = " ".join(fixed)
+                        changed.append((slide_idx, shape.shape_id))
+    return changed
+
+
 def drop_needless_soft_hyphens(prs, resolver, slide_indices=None):
     """Remove soft hyphens from words that fit after the final size is known.
 

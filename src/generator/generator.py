@@ -37,7 +37,7 @@ from generator.text_fit import (
 )
 from qa.geometry import (MIN_READABLE_PT, drop_needless_soft_hyphens, enforce_text_fits,
                          harmonize_clone_font_sizes, keep_text_clear_of_side_art,
-                         keep_text_inside_slide)
+                         keep_text_inside_slide, unglue_overwide_pairs)
 from qa.package_check import assert_valid_package
 from template_parser.parser import extract_template, extract_theme
 
@@ -1205,11 +1205,59 @@ def _renumber_slot_badge(marker, position):
     marker.name = SLOT_BADGE_NAME
 
 
+# A box directly under a slot continues its stack when the gap between them is
+# under this: VK Tech 26 sets «Текст» 0.10in under «Заголовок».
+_SLOT_STACK_MAX_GAP_EMU = int(Inches(0.3))
+
+
+def _slot_room(slide, slot, slots):
+    """Height from the slot's top to the bottom of the stack of text boxes
+    right under it in its own column — boxes that are not slots themselves,
+    so filling the list blanks them and their room is the slot's.
+
+    VK Tech's card slide sets «Заголовок» (14pt, one line, 0.16in) over
+    «Текст» (0.22in) in each card. The list goes into the heading boxes, the
+    «Текст» boxes are cleared, and the item budget came out as one 1.77in line
+    — 17 characters: «Требуются 2», «Планируется» (iter138) while half the card
+    stood empty. Only same-width boxes in the same column count; badges, the
+    next row of slots and anything across the slide do not."""
+    slot_ids = {s.shape_id for s in slots}
+    left, width = int(slot.left), int(slot.width)
+    bottom = int(slot.top + slot.height)
+    below = sorted(
+        (s for s in _text_shapes(slide)
+         if s.shape_id not in slot_ids and s.shape_id != slot.shape_id
+         and s.left is not None and s.top is not None and s.width and s.height
+         and abs(int(s.left) - left) <= _SLOT_ALIGN_TOLERANCE_EMU
+         and abs(int(s.width) - width) <= _SLOT_ALIGN_TOLERANCE_EMU
+         and int(s.top) >= bottom - _SLOT_ALIGN_TOLERANCE_EMU),
+        key=lambda s: int(s.top))
+    for s in below:
+        if int(s.top) - bottom > _SLOT_STACK_MAX_GAP_EMU:
+            break
+        bottom = max(bottom, int(s.top + s.height))
+    return bottom - int(slot.top)
+
+
 def _fill_list_slots(slide, slots, texts, claimed_ids, resolver=None):
     """One text per slot box; surplus slot boxes are physically removed along
     with their markers (a blanked box would still hold layout space, and its
     orphaned dot is the exact artifact this path exists to prevent)."""
     position = 1
+    # Each slot takes the room of the stack under it (see _slot_room) BEFORE
+    # its text is fitted: the item budget counted those lines, and a fit to the
+    # one-line box would shrink them back into it.
+    rooms = [_slot_room(slide, slot, slots) for slot in slots[:len(texts)]]
+    for slot, room in zip(slots, rooms):
+        if room > int(slot.height):
+            slot.height = Emu(room)
+            # A leading under 100% is only harmless on one line: VK Tech sets
+            # its card headings at 64%, and a wrapped item printed its lines
+            # over each other (iter139).
+            for paragraph in slot.text_frame.paragraphs:
+                spacing = paragraph.line_spacing
+                if isinstance(spacing, float) and not isinstance(spacing, Length) and spacing < 1.0:
+                    paragraph.line_spacing = 1.0
     for slot, text in zip(slots, texts):
         _set_run_text(slot, text, claimed_ids, resolver=resolver)
         # A numbering badge beside a FILLED slot is the template's furniture,
@@ -1897,6 +1945,7 @@ def get_item_char_budget(slide, archetype, resolver=None):
     if shapes:
         samples = [s.text_frame.text.strip() for s in shapes if s.has_text_frame]
         line_box = shapes[0]
+        lines = _room_lines(line_box, _slot_room(slide, line_box, shapes))
     else:
         body_shape = _pick_body_shape(slide, claimed_ids)
         if body_shape is None:
@@ -1906,11 +1955,26 @@ def get_item_char_budget(slide, archetype, resolver=None):
             for i in _content_slot_indices(body_shape)
         ]
         line_box = body_shape
+        lines = 1
     lengths = [len(t) for t in samples if t]
     if not lengths:
         return None
     sampled = max(MIN_ITEM_CHARS, round(max(lengths) * ITEM_CHARS_SLACK))
-    return max(sampled, _one_line_chars(line_box, resolver))
+    return max(sampled, lines * _one_line_chars(line_box, resolver))
+
+
+def _room_lines(box, room_emu):
+    """Whole lines of the box's own text that fit a room of room_emu height
+    (at least one: the box itself is the floor)."""
+    run = _reference_run(box)
+    size_pt = run.font.size.pt if run is not None and run.font.size else _FALLBACK_BASE_SIZE_PT
+    top_inset, bottom_inset = vertical_insets_emu(box)
+    usable_pt = Emu(max(0, int(room_emu) - top_inset - bottom_inset)).pt
+    spacing = _shape_line_spacing(box)
+    if isinstance(spacing, float) and not isinstance(spacing, Length) and spacing < 1.0:
+        spacing = 1.0  # as _fill_list_slots sets it once the slot wraps
+    pitch = paragraph_pitch_pt(size_pt, line_spacing=spacing)
+    return max(1, int(usable_pt // pitch)) if pitch else 1
 
 
 # A template picture smaller than this share of the slide is an icon or a
@@ -2531,6 +2595,7 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
     keep_text_clear_of_side_art(prs, resolver, slide_indices=final_order)
     shrink_fixes = enforce_text_fits(prs, resolver, slide_indices=final_order)
     drop_needless_soft_hyphens(prs, resolver, slide_indices=final_order)
+    unglue_overwide_pairs(prs, resolver, slide_indices=final_order)
     harmonize_changes = harmonize_clone_font_sizes(prs, fill_groups.values())
     harmonize_changes += _harmonize_slot_sizes(prs, final_order)
     _realign_icons_after_resize(prs, list(shrink_fixes) + harmonize_changes, resolver=resolver)
