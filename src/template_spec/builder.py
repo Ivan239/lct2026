@@ -13,8 +13,10 @@ changing consumers."""
 from pptx import Presentation
 
 from common.pictures import has_data_object
+from fonts.metrics import FontResolver
 from generator.generator import get_capacity, get_item_char_budget
 from generator.slide_kit import content_text_shapes
+from template_parser.parser import extract_theme
 
 # Roles that make sense as fill targets. "other" is everything we explicitly
 # refuse to reuse (e.g. chart-anchored slides) — never part of a family.
@@ -49,6 +51,9 @@ def build_spec(template_path, archetype_map, style_profile=None):
     to keep generated decks on the template's own color rhythm."""
     prs = Presentation(template_path)
     backgrounds = (style_profile or {}).get("backgrounds", {})
+    # Font metrics for the item budget: how many characters one line of a list
+    # slot really holds (get_item_char_budget).
+    resolver = FontResolver(template_path, extract_theme(template_path))
 
     by_role = {}
     for idx, role in archetype_map.items():
@@ -79,7 +84,7 @@ def build_spec(template_path, archetype_map, style_profile=None):
                 continue
             # How LONG one item may be here, not just how many fit — a 1.93in
             # one-line slot and a full-width prose box are both "a list".
-            entry["item_chars"] = get_item_char_budget(prs.slides[idx], role)
+            entry["item_chars"] = get_item_char_budget(prs.slides[idx], role, resolver)
         by_role.setdefault(role, []).append(entry)
 
     families = []

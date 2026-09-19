@@ -18,6 +18,7 @@ from generator.deck_style import apply_observed_style, observe_deck_style
 from generator.layout_bounds import infer_content_bounds
 from generator.synthesizer import IMAGE_PLACEHOLDER_NAME, SYNTHESIZERS
 from generator.text_fit import (
+    AVG_CHAR_WIDTH_FACTOR,
     SINGLE_LINE_SAFETY,
     _usable_width_in,
     estimate_wrapped_lines,
@@ -1810,7 +1811,26 @@ ITEM_CHARS_SLACK = 1.2
 MIN_ITEM_CHARS = 12
 
 
-def get_item_char_budget(slide, archetype):
+# Average character width is taken from real Russian body text, spaces
+# included — they are part of every line.
+_LINE_SAMPLE = "ручной сбор показателей из разных систем"
+
+
+def _one_line_chars(shape, resolver=None):
+    """Characters one line of `shape` holds at the size its own text is set
+    (the fallback base size when the size is inherited)."""
+    run = _reference_run(shape)
+    size_pt = run.font.size.pt if run is not None and run.font.size else _FALLBACK_BASE_SIZE_PT
+    width_pt = (Emu(shape.width).inches - horizontal_margins_in(shape)) * 72 * SINGLE_LINE_SAFETY
+    metrics = _metrics_for_run(run, resolver)
+    if metrics is not None:
+        per_char = metrics.text_width_pt(_LINE_SAMPLE, size_pt) / len(_LINE_SAMPLE)
+    else:
+        per_char = size_pt * AVG_CHAR_WIDTH_FACTOR
+    return max(0, int(width_pt / per_char)) if per_char else 0
+
+
+def get_item_char_budget(slide, archetype, resolver=None):
     """How LONG a single list item may be on this slide — the companion to
     get_capacity, which only answers HOW MANY.
 
@@ -1831,13 +1851,21 @@ def get_item_char_budget(slide, archetype):
     metrics give ~17 chars for that slot at its rendered size, the sample is 15.
 
     Returns None when there is no sample to learn from — the caller keeps its
-    flat default, so a template that ships empty slots is no worse off."""
+    flat default, so a template that ships empty slots is no worse off.
+
+    A sample SHORTER than one line of its slot says nothing about length: VK
+    Tech writes «Пункт» and «Текст» into slots that hold 20-28 characters a
+    line, the budget came out at 12, and every item was cut to one word —
+    «Снижение», «Обязательная», «Выход» (iter125, iter126). There the line is
+    the limit. Where the designer's sample fills the line or more (T-Zh mono
+    «Название пункта», universal «Длинное название пункта»), it still decides."""
     if archetype != "bullet_list":
         return None
     claimed_ids = set()
     shapes = _find_slot_boxes(slide, claimed_ids)  # same order as _fill_bullet_list
     if shapes:
         samples = [s.text_frame.text.strip() for s in shapes if s.has_text_frame]
+        line_box = shapes[0]
     else:
         body_shape = _pick_body_shape(slide, claimed_ids)
         if body_shape is None:
@@ -1846,10 +1874,12 @@ def get_item_char_budget(slide, archetype):
             "".join(run.text for run in body_shape.text_frame.paragraphs[i].runs).strip()
             for i in _content_slot_indices(body_shape)
         ]
+        line_box = body_shape
     lengths = [len(t) for t in samples if t]
     if not lengths:
         return None
-    return max(MIN_ITEM_CHARS, round(max(lengths) * ITEM_CHARS_SLACK))
+    sampled = max(MIN_ITEM_CHARS, round(max(lengths) * ITEM_CHARS_SLACK))
+    return max(sampled, _one_line_chars(line_box, resolver))
 
 
 # A template picture smaller than this share of the slide is an icon or a
