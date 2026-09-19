@@ -943,11 +943,24 @@ _MIN_SLOT_BOXES = 3
 
 def _uniform_axis(values):
     """Distinct sorted axis coordinates (tolerance-bucketed), or None when the
-    gaps between neighbors aren't near-constant."""
-    buckets = sorted({int(v // _SLOT_ALIGN_TOLERANCE_EMU) for v in values})
-    coords = [b * _SLOT_ALIGN_TOLERANCE_EMU for b in buckets]
-    if len(coords) > 2:
-        steps = [coords[i + 1] - coords[i] for i in range(len(coords) - 1)]
+    gaps between neighbors aren't near-constant.
+
+    The steps are measured on the REAL coordinates (the smallest in each
+    bucket), not on the bucket floors: flooring to 0.1in adds up to 0.1in of
+    error per coordinate, i.e. up to 0.2in to a step difference — more than the
+    whole jitter allowance. T-Zh mono's four-column slide sits at 0.31 / 2.67 /
+    5.14 / 7.49in: real steps 2.36 / 2.47 / 2.35 (0.12 apart, a grid), floored
+    steps 2.3 / 2.5 / 2.3 (0.2 apart, "not a grid") — so its captions were never
+    seen as list slots and the bullets went into the title box (iter118 probe,
+    12-slide deck)."""
+    buckets = {}
+    for v in values:
+        key = int(v // _SLOT_ALIGN_TOLERANCE_EMU)
+        buckets[key] = min(int(v), buckets.get(key, int(v)))
+    coords = [key * _SLOT_ALIGN_TOLERANCE_EMU for key in sorted(buckets)]
+    real = [buckets[key] for key in sorted(buckets)]
+    if len(real) > 2:
+        steps = [real[i + 1] - real[i] for i in range(len(real) - 1)]
         if max(steps) - min(steps) > _SLOT_PITCH_JITTER_EMU:
             return None
     return coords
