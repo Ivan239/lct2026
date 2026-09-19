@@ -246,7 +246,7 @@ UNMEASURED_ON_ARTWORK = "текст лежит на картинке — фон�
 UNMEASURED_NO_GLYPHS = "глифы не выделяются из фона"
 
 
-def _box_contrast(pixels, reasons=None):
+def _box_contrast(pixels, reasons=None, em_px=None):
     """(ratio, ink, bg) for one text box, or None when it can't be measured.
 
     `reasons` collects WHY, when the caller passes a list. A bare count of
@@ -281,10 +281,69 @@ def _box_contrast(pixels, reasons=None):
         # against. Either way this box cannot answer the question; stay silent
         # rather than report a number that means something else.
         return _no(UNMEASURED_NO_GLYPHS)
-    colour, n = Counter(ink).most_common(1)[0]
+    ink_counts = Counter(ink)
+    colour, n = ink_counts.most_common(1)[0]
     if n / len(ink) < MIN_INK_FRACTION:
         return _no(UNMEASURED_NO_GLYPHS)
+    if em_px is not None and em_px < THIN_STROKE_EM_PX:
+        colour = _stroke_core(ink_counts, bg, colour, len(ink))
     return contrast_ratio(colour, bg), colour, bg
+
+
+# Below this em size in render pixels a stroke is one or two pixels wide and
+# nearly all of it is blended with the background: at 150 px/in that is text
+# under ~12pt. Above it the modal ink colour is the text colour.
+THIN_STROKE_EM_PX = 24
+# A colour must cover this share of a box's ink to count as the stroke core —
+# enough to rule out a stray pixel, small enough for the thin core of 8pt text.
+CORE_MIN_SHARE = 0.05
+CORE_MIN_PIXELS = 3
+# The blend lies on the line from the background to the ink; a colour off that
+# line is some OTHER text in the box, not the core of this one.
+CORE_MIN_COSINE = 0.97
+
+
+def _em_px(shape, image_width_px, slide_width_emu):
+    """The box's largest explicit font size in render pixels, None when the
+    size is inherited (then the modal colour is kept, as before)."""
+    sizes = [r.font.size.pt for p in shape.text_frame.paragraphs for r in p.runs
+             if r.font.size and r.text.strip()]
+    if not sizes or not slide_width_emu:
+        return None
+    return max(sizes) / 72 * image_width_px / (slide_width_emu / 914400)
+
+
+def _stroke_core(ink_counts, bg, modal, total):
+    """The ink colour at the CORE of thin strokes.
+
+    At 8pt nearly every stroke pixel is a blend of ink and background, so the
+    modal ink colour is a blend: VK Tech's small blue «Текст», declared
+    (0,125,234) — about 4:1 on its card — measured (144,192,240), 1.68; the
+    team slide's «Должность», declared (121,132,146), about 3.5:1, measured
+    1.88 (iter126 took that for a real WCAG failure; it was this artefact).
+
+    The blend lies between the background and the ink, so the core is the
+    substantial colour farthest out along the SAME line from the background.
+    Only along that line: «farthest from the background» alone picked the black
+    heading of the image skeleton over its grey caption, and the black word next
+    to a purple question on survey-31 — other text, whose better contrast would
+    hide the worse one the slide is judged by."""
+    mv = tuple(m - b for m, b in zip(modal, bg))
+    mlen = sum(x * x for x in mv) ** 0.5
+    if not mlen:
+        return modal
+    floor = max(CORE_MIN_PIXELS, total * CORE_MIN_SHARE)
+    best, best_len = modal, mlen
+    for c, k in ink_counts.items():
+        if k < floor:
+            continue
+        v = tuple(x - b for x, b in zip(c, bg))
+        vlen = sum(x * x for x in v) ** 0.5
+        if vlen <= best_len:
+            continue
+        if sum(x * y for x, y in zip(v, mv)) / (vlen * mlen) >= CORE_MIN_COSINE:
+            best, best_len = c, vlen
+    return best
 
 
 def evaluate_boxed_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATIO):
@@ -322,7 +381,7 @@ def evaluate_boxed_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATIO):
                     continue
                 measured = _box_contrast(
                     _box_pixels(img, (shape.left, shape.top, shape.width, shape.height), size),
-                    reasons=why)
+                    reasons=why, em_px=_em_px(shape, img.size[0], size[0]))
                 if measured is None:
                     # Counted, not just skipped: a box we cannot measure is text
                     # whose readability nobody checked, and silence about it

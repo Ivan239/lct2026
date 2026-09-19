@@ -52,10 +52,11 @@ def _one_slide(src, keep, out, only_groups=False):
 def test_pixel_contrast_measures_text_inside_groups(tmp_path):
     deck = _one_slide(VK_TECH, TEAM_SLIDE, str(tmp_path / "team.pptx"))
     res = evaluate_boxed_contrast(deck, TEAM_RENDER[:1])
-    # The designer's «Должность» captions are (176,176,192) on (240,240,240):
-    # 1.88 by WCAG. Only the grouped boxes carry that grey — the title is black.
-    assert res["low_contrast_slides"] == [0], res["per_slide"]
-    assert res["per_slide"][0] < 2.5, res["per_slide"]
+    # Only the grouped boxes carry a grey («Должность», declared (121,132,146));
+    # the title is black, ~18:1. A worst box well under that means the group
+    # was measured. (iter126 asserted 1.88 and «low contrast» here — that was
+    # the thin-stroke blend, not the grey; see test_contrast_thin_strokes.)
+    assert res["per_slide"][0] < 10, res["per_slide"]
 
 
 @pytest.mark.skipif(not os.path.exists(VK_EDUCATION), reason=f"fixture deck missing: {VK_EDUCATION}")
