@@ -179,4 +179,51 @@ def has_data_object(slide):
                 return True
         return False
 
-    return walk(slide.shapes)
+    return walk(slide.shapes) or has_connector_diagram(slide)
+
+
+# A flowchart is a graph: many connectors, several of them arrows. Measured over
+# the corpus: VK Education's «Оформление схем» example — 15 connector lines, 9
+# arrowed; the next highest slides are a Gantt chart's gridlines (6 lines, no
+# arrows), T-Zh mono's column separators (4, none) and a WorkSpace timeline
+# «01 → 02 → 03 → 04» (3 lines, 3 arrows — a legitimate list layout).
+DIAGRAM_MIN_CONNECTORS = 6
+DIAGRAM_MIN_ARROWS = 3
+
+
+def _connector_lines(slide):
+    from pptx.oxml.ns import qn
+
+    def walk(shapes):
+        for shape in shapes:
+            if shape.shape_type == MSO_SHAPE_TYPE.GROUP:
+                yield from walk(shape.shapes)
+            elif shape.shape_type == MSO_SHAPE_TYPE.LINE or shape._element.tag == qn("p:cxnSp"):
+                yield shape
+
+    return list(walk(slide.shapes))
+
+
+def _is_arrowed(shape):
+    from pptx.oxml.ns import qn
+
+    ln = shape._element.find(".//" + qn("a:ln"))
+    if ln is None:
+        return False
+    return any(end is not None and end.get("type") not in (None, "none")
+               for end in (ln.find(qn("a:headEnd")), ln.find(qn("a:tailEnd"))))
+
+
+def has_connector_diagram(slide):
+    """True when the slide is a flowchart the designer drew as an example.
+
+    Its boxes are the nodes of someone else's diagram, not the slots of a list:
+    VK Education's «Оформление схем» (a template guide slide) was classified
+    as a list, the one node with text — a 1.26in circle — took the bullets, the
+    other nodes stayed empty, and the render showed «Необход/имые действия
+    руководс/тва» broken inside the circle among blank boxes and arrows
+    (iter130). Nothing fills diagrams yet (backlog item 5), so like a table it
+    is not offered."""
+    lines = _connector_lines(slide)
+    return (len(lines) >= DIAGRAM_MIN_CONNECTORS
+            and sum(1 for s in lines if _is_arrowed(s)) >= DIAGRAM_MIN_ARROWS)
