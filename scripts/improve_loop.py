@@ -2,10 +2,12 @@
 
     .venv/bin/python3 scripts/improve_loop.py [--model GigaChat-2-Max]
                                               [--source output/templates/<file>.pptx]
+                                              [--content auto|canonical|<package>]
                                               [--brief-file path.txt]
 
 Picks a model, ensures a template parsed by that model exists, generates a deck
-from a canonical brief, scores it against docs/evaluation_rubric.md, and prints
+from a content package (samples/content_packages/, rotated) or the canonical
+brief, scores it against docs/evaluation_rubric.md, and prints
 the report + the paths. The detailed improvement PLAN and any code changes are
 authored by whoever reads this output (a human, or the agent on a scheduled
 fire) — this script's job is to produce the reproducible evaluation to plan from.
@@ -22,6 +24,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+from content_package import extract_numbers, load_package, to_brief_text
 from evaluation.evaluate import format_report
 from evaluation.loop import run_iteration
 from llm_clients import backends
@@ -59,6 +62,27 @@ REGRESSION_TEMPLATES = [
 TEMPLATE_SCHEDULE = ["vk:0", "vk:1", "regression", "vk:0", "vk:1", "blind"]
 STATE_FILE = os.path.join(BASE, ".loop_state.json")
 
+# The loop's content: the sample content packages, one per purpose from the VK
+# Tech brief (feature, project, initiative). The canonical brief below has no
+# numbers at all, so every number on a deck made from it is invented — the
+# check «все цифры есть в исходных материалах» stood at 1 on every such deck
+# (iter108: 20 of 20) and measured nothing. A package carries facts, a table and
+# the reference numbers.
+PACKAGES_DIR = os.path.join(BASE, "samples", "content_packages")
+
+
+def _packages():
+    return sorted(d for d in os.listdir(PACKAGES_DIR)
+                  if os.path.isdir(os.path.join(PACKAGES_DIR, d)))
+
+
+def _package_step(p, next_slot):
+    """The package counter moves one per iteration and one more whenever the
+    template schedule wraps. Moving in lockstep would pin content to template:
+    six schedule slots against three packages means VK Tech (slots 0 and 3)
+    would only ever see the same package."""
+    return p + 1 + (1 if next_slot == 0 else 0)
+
 
 def _load_state():
     if os.path.exists(STATE_FILE):
@@ -74,7 +98,7 @@ def _next_from_rotation():
     walks through combinations instead of pinning one template to one model.
     State file is gitignored so it never pollutes the safety-net commits."""
     st = _load_state()
-    i, j, r = st.get("i", 0), st.get("t", 0), st.get("r", 0)
+    i, j, r, p = st.get("i", 0), st.get("t", 0), st.get("r", 0), st.get("p", 0)
     model = ROTATION[i % len(ROTATION)]
     slot = TEMPLATE_SCHEDULE[j % len(TEMPLATE_SCHEDULE)]
     if slot == "blind":
@@ -84,11 +108,15 @@ def _next_from_rotation():
         r += 1
     else:
         template = VK_TEMPLATES[int(slot.split(":")[1])]
+    packages = _packages()
+    package = packages[p % len(packages)] if packages else None
+    next_slot = (j + 1) % len(TEMPLATE_SCHEDULE)
     with open(STATE_FILE, "w") as f:
         json.dump({"i": (i + 1) % len(ROTATION),
-                   "t": (j + 1) % len(TEMPLATE_SCHEDULE),
-                   "r": r % len(REGRESSION_TEMPLATES)}, f)
-    return model, template
+                   "t": next_slot,
+                   "r": r % len(REGRESSION_TEMPLATES),
+                   "p": _package_step(p, next_slot) % max(1, len(packages))}, f)
+    return model, template, package
 
 
 def _resolve_source(arg):
@@ -119,22 +147,38 @@ CANONICAL_BRIEF = (
 )
 
 
+def _resolve_content(args, rotated_package):
+    """(brief, source_numbers, label). A package gives the labelled brief and its
+    own numbers as the reference; a plain brief is its own reference."""
+    if args.brief_file:
+        with open(args.brief_file, encoding="utf-8") as f:
+            brief = f.read().strip()
+        return brief, extract_numbers(brief), f"бриф {os.path.basename(args.brief_file)}"
+    if args.content == "canonical" or (args.content == "auto" and not rotated_package):
+        return CANONICAL_BRIEF, extract_numbers(CANONICAL_BRIEF), "канонический бриф"
+    path = (os.path.join(PACKAGES_DIR, rotated_package) if args.content == "auto"
+            else args.content)
+    package = load_package(path)
+    label = f"пакет {os.path.basename(os.path.normpath(path))} ({package['purpose_label'] or '—'})"
+    return to_brief_text(package), package["numbers"], label
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="GigaChat-2-Max",
                     help="model name, or 'auto' to rotate through ROTATION")
     ap.add_argument("--source", default="auto",
                     help="'auto' rotates real templates, or a template id / path")
-    ap.add_argument("--brief-file", default=None)
+    ap.add_argument("--content", default="auto",
+                    help="'auto' rotates samples/content_packages, 'canonical' is the "
+                         "old brief without numbers, or a package folder / .zip")
+    ap.add_argument("--brief-file", default=None,
+                    help="a plain brief instead of a package (numbers checked against it)")
     ap.add_argument("--out-json", default=None, help="also write the result bundle here")
     args = ap.parse_args()
 
-    brief = CANONICAL_BRIEF
-    if args.brief_file:
-        with open(args.brief_file, encoding="utf-8") as f:
-            brief = f.read().strip()
-
-    rotated_model, rotated_template = _next_from_rotation()
+    rotated_model, rotated_template, rotated_package = _next_from_rotation()
+    brief, source_numbers, content_label = _resolve_content(args, rotated_package)
     requested = rotated_model if args.model == "auto" else args.model
     source = _resolve_source(args.source) or os.path.join(TEMPLATES_DIR, f"{rotated_template}.pptx")
     try:
@@ -146,8 +190,10 @@ def main():
         print(f"[loop] {note}: модель {requested} — {e}")
         return
     source_name = os.path.splitext(os.path.basename(source))[0]
-    print(f"[loop] model={model_name} source={source_name}", flush=True)
-    result = run_iteration(gen_client, model_name, source, brief, source_name=source_name)
+    print(f"[loop] model={model_name} source={source_name} content={content_label}", flush=True)
+    result = run_iteration(gen_client, model_name, source, brief, source_name=source_name,
+                           source_numbers=source_numbers)
+    result["content"] = content_label
 
     ev = result["evaluation"]
     print("\n" + format_report(ev))

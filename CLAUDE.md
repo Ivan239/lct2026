@@ -9,7 +9,8 @@ AI-генератор презентаций (хакатон, 2 мес, комм
 - Backend: `.venv/bin/uvicorn src.api.main:app --app-dir . --port 8000` (без --reload — после правок перезапускать).
 - Frontend: `cd frontend && npm run dev` (Vite, порт 5173).
 - Оценка + цикл улучшения: `.venv/bin/python3 scripts/improve_loop.py --model auto`
-  (генерит деку по каноническому брифу, гоняет ДЕТЕРМИНИРОВАННЫЕ проверки без
+  (генерит деку по контент-пакету из `samples/content_packages/` по кругу, `--content
+  canonical` — старый бриф без цифр; гоняет ДЕТЕРМИНИРОВАННЫЕ проверки без
   токенов, пишет JSON в `output/evaluations/`, печатает пути рендеров). Рубрика —
   `docs/evaluation_rubric.md`; харнесс — `src/evaluation/` (rubric-веса +
   гео/типографика-проверки + render-based contrast). **LLM-критерии (композиция,
