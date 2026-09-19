@@ -35,7 +35,7 @@ from design_system.style_profile import build_measured_profile, rotation_targets
 from content_parser.two_phase import generate_block, generate_outline, stat_fingerprints
 from evaluation.evaluate import evaluate_deck
 from generator.generator import generate
-from generator.slide_kit import content_text_shapes
+from generator.slide_kit import canvas_content_count, content_text_shapes
 from llm_clients.backends import GIGACHAT_MODELS
 from matcher.matcher import plan_from_outline
 from rendering.render import render_pptx_to_pngs
@@ -187,7 +187,7 @@ def _synth_canvas_hints(source_pptx, plan, profile):
             )
             if has_photo:
                 continue
-            candidates.append((len(content_text_shapes(slide)), idx, profile["backgrounds"].get(idx)))
+            candidates.append((canvas_content_count(slide), idx, profile["backgrounds"].get(idx)))
         if not candidates:
             return {}
         # "Fewest text boxes" alone picks the blandest slide in the file, and the

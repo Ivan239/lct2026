@@ -93,6 +93,19 @@ def content_groups(slide):
     ]
 
 
+def canvas_content_count(slide):
+    """How much content a slide carries, for choosing a synthesis canvas: its
+    content text boxes AND its content groups.
+
+    Counting text boxes alone made VK Tech's four-card slide look like bare
+    furniture — its cards are groups, only the title is a top-level box — so it
+    was picked as the canvas for synthesized slides. Synthesis removes the
+    cards (content_groups) but not the single backing shape with their
+    cut-outs, and the image skeleton and two-column text were drawn across four
+    empty card backings on every such deck (iter105, 111, 114, 117, 120)."""
+    return len(content_text_shapes(slide)) + len(content_groups(slide))
+
+
 def clone_slide(prs, source_idx):
     """Duplicates a template slide (shapes, images, formatting) as a new slide
     at the end of the deck, returns its index. Exists so a deck that needs two

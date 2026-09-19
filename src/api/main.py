@@ -31,7 +31,7 @@ from design_system.fingerprint_cache import FingerprintCache
 from design_system.extractor import _describe_slide
 from design_system.style_card import build_style_card, card_path, card_prompt_preamble, load_card, save_card
 from design_system.style_profile import build_measured_profile, rotation_targets
-from generator.slide_kit import content_text_shapes
+from generator.slide_kit import canvas_content_count, content_text_shapes
 from generator.generator import generate, get_capacity
 from llm_clients.gigachat import GigaChatClient
 from matcher.matcher import match_content_to_slides, plan_from_outline
@@ -410,7 +410,7 @@ def _synth_canvas_hints(template_id, plan):
             )
             if has_photo:
                 continue
-            n_boxes = len(content_text_shapes(slide))
+            n_boxes = canvas_content_count(slide)
             candidates.append((n_boxes, idx, profile["backgrounds"].get(idx)))
         if not candidates:
             return {}
