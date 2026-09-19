@@ -1677,6 +1677,37 @@ def _keep_figure_on_one_line(box, text, resolver=None):
                 run.font.size = fitted
 
 
+def _keep_figure_clear_of_its_label(figure_box, label_box, resolver=None):
+    """A figure box ends where its own label begins.
+
+    Designers overlap the two: VK Tech's figure box runs to 4.21in while the
+    label starts at 4.03in, and «7» at 166pt still clears it because a line
+    that tall carries a 0.5in descent under the digits. Ours is a fitted 29pt,
+    its descent is 0.08in, and bottom-anchored text follows the box down —
+    «94 секунды» printed through «среднее время поиска» (iter141). Measured:
+    15 of the 55 figure/label pairs in the VK templates are stacked like this.
+    Trimming the box lifts the text with it; a box already shorter than its own
+    line is left alone, since shrinking it further only invites the renderer's
+    autofit."""
+    if not all((figure_box, label_box)) or figure_box.top is None or label_box.top is None:
+        return
+    if label_box.top <= figure_box.top:  # label beside or above: no stack to fix
+        return
+    room = label_box.top - figure_box.top
+    if room >= figure_box.height:
+        return
+    paragraph = figure_box.text_frame.paragraphs[0]
+    size = _max_font_pt(figure_box)
+    if not size:
+        return
+    line_in = _paragraph_line_height_pt(
+        paragraph, size, _metrics_for_run(_reference_run(figure_box), resolver)) / 72
+    top_inset, bottom_inset = vertical_insets_emu(figure_box)
+    if room < Inches(line_in) + top_inset + bottom_inset:
+        return
+    figure_box.height = Emu(int(room))
+
+
 def _unify_figure_sizes(designed):
     """Figures the designer set at ONE size stay at one size.
 
@@ -1721,13 +1752,18 @@ def _fill_stats_kpi(slide, data, claimed_ids, resolver=None):
     max_pairs = len(boxes) // 2
 
     if max_pairs >= 1:
-        designed = []
+        designed, pairs = [], []
         for (num, label), (figure_box, label_box) in zip(stats[:max_pairs], _stat_pairs(boxes)):
             designed.append((figure_box, _max_font_pt(figure_box)))
+            pairs.append((figure_box, label_box))
             _set_run_text(figure_box, num, claimed_ids, resolver=resolver)
             _keep_figure_on_one_line(figure_box, num, resolver=resolver)
             _set_run_text(label_box, label, claimed_ids, resolver=resolver)
         _unify_figure_sizes(designed)
+        # After the size is final: a fitted figure is smaller than the one the
+        # box was built for, and bottom-anchored text sinks into the label.
+        for figure_box, label_box in pairs:
+            _keep_figure_clear_of_its_label(figure_box, label_box, resolver=resolver)
     elif boxes:
         # Real decks often hold this kind of content as one text block next to
         # small bullet/icon graphics, not as separate number+label boxes — with
