@@ -26,6 +26,15 @@ FILLABLE_ROLES = {
 # Roles where "capacity" (how many list items fit) is a meaningful constraint.
 COUNTED_ROLES = {"bullet_list", "stats_kpi"}
 
+# A KPI board holds a handful of figures; the VK Tech brief's density check
+# fails a slide with more than six items. Measured over the corpus: the real
+# boards hold 1-4 pairs, while VK Tech offered stats slides of capacity 10-40 —
+# a table drawn with text boxes (slide 48: «Текст / 100 / 100», header row,
+# «Итого:»), calendars at 4-8pt (32-36) and a chart built of pictures (43).
+# Filled as figure/caption pairs, the table came out scrambled across its
+# cells on seven decks in a row (iter105-iter120).
+MAX_KPI_PAIRS = 6
+
 
 def build_spec(template_path, archetype_map, style_profile=None):
     """archetype_map: {slide_index(int): archetype(str)} -> spec dict:
@@ -66,6 +75,8 @@ def build_spec(template_path, archetype_map, style_profile=None):
         entry = {"idx": idx, "capacity": None, "bg": backgrounds.get(idx)}
         if role in COUNTED_ROLES:
             entry["capacity"] = get_capacity(prs.slides[idx], role)
+            if role == "stats_kpi" and (entry["capacity"] or 0) > MAX_KPI_PAIRS:
+                continue
             # How LONG one item may be here, not just how many fit — a 1.93in
             # one-line slot and a full-width prose box are both "a list".
             entry["item_chars"] = get_item_char_budget(prs.slides[idx], role)
