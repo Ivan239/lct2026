@@ -12,7 +12,8 @@ from pptx.util import Emu, Inches, Pt
 from generator.deck_style import _luminance, _slide_bg_hex
 from generator.slide_kit import clone_slide, content_groups, content_text_shapes
 from generator.text_fit import (SINGLE_LINE_SAFETY, cap_size_to_longest_word,
-                                estimate_block_height_in, fit_font_size)
+                                estimate_block_height_in, fit_font_size,
+                                fit_font_size_single_line)
 
 # Used only when the template has too few real content shapes to infer bounds
 # from (see layout_bounds.infer_content_bounds returning None).
@@ -770,18 +771,33 @@ def synthesize_stats_kpi(prs, theme, bounds_in, data, resolver=None, canvas_idx=
     if stats:
         total_width = Emu(b["right"] - b["left"])
         col_width = Emu(total_width // len(stats))
+        # One size for every figure of the board, the largest at which EACH
+        # figure is one line of its column — the rule _keep_figure_on_one_line
+        # applies to native boards (iter115). At a flat 44pt six columns are
+        # 1.5in wide, «≤40 мин.» and «18,4 млн ₽» wrapped, and the second line
+        # printed over the caption under it (iter122, survey-31).
+        figures = [str(num) for num, _ in stats]
+        labels = [str(label) for _, label in stats]
+        figure_pt = fit_font_size_single_line(
+            figures, col_width, 44, min_size_pt=18,
+            metrics=_metrics_for(resolver, t["major_font"], bold=True))
+        figure_pt = figure_pt.pt if figure_pt is not None else 18
+        # Captions cap on their longest word, as the two-column synthesis
+        # does: «данных клиентов перенесено» broke as «перенесе/но».
+        label_pt = cap_size_to_longest_word(labels, col_width, 16,
+                                            metrics=_metrics_for(resolver, t["minor_font"]))
         for i, (num, label) in enumerate(stats):
             left = Emu(b["left"] + col_width * i)
             num_box = slide.shapes.add_textbox(left, content_top, col_width, Emu(int(Inches(0.9))))
             num_box.text_frame.word_wrap = True
             num_box.text_frame.text = str(num)
-            _style_paragraph(num_box.text_frame.paragraphs[0], t["major_font"], 44, t["accent"], bold=True)
+            _style_paragraph(num_box.text_frame.paragraphs[0], t["major_font"], figure_pt, t["accent"], bold=True)
 
             label_top = Emu(content_top + Emu(int(Inches(1.0))))
             label_box = slide.shapes.add_textbox(left, label_top, col_width, Emu(int(Inches(0.8))))
             label_box.text_frame.word_wrap = True
             label_box.text_frame.text = str(label)
-            _style_paragraph(label_box.text_frame.paragraphs[0], t["minor_font"], 16, t["text"])
+            _style_paragraph(label_box.text_frame.paragraphs[0], t["minor_font"], label_pt, t["text"])
 
     return idx
 
