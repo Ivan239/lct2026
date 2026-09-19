@@ -690,12 +690,47 @@ def _align_left_edges(anchor_shape, *other_shapes, tolerance_emu=45720):
     """Native templates sometimes have the title and body textboxes at slightly
     different left positions (off by a fraction of an inch) — invisible in the
     original content, but jarring once we point at both with our own text.
-    tolerance_emu defaults to ~0.05in, below which a gap isn't worth touching."""
+    tolerance_emu defaults to ~0.05in, below which a gap isn't worth touching.
+
+    An indent that clears a PICTURE is design, not a slip: VK Education's cover
+    sets the speaker line at 2.94in, right of a round speaker photo at
+    0.72–2.49in, while the title starts at 0.68in. Aligned, the subtitle went
+    under the photo on every VK Education deck (iter103–iter112, five times).
+    A cap on the shift is not the answer — one was tried and reverted: a body
+    returned to its own column hung in an empty slide (CLAUDE.md). The rule is
+    about the cause: the box stays where it is when moving it would put it over
+    a picture it does not touch now."""
     if anchor_shape is None or anchor_shape.left is None:
         return
     for shape in other_shapes:
         if shape is not None and shape.left is not None and abs(shape.left - anchor_shape.left) > tolerance_emu:
+            if _move_lands_on_picture(shape, anchor_shape.left):
+                continue
             shape.left = anchor_shape.left
+
+
+def _overlaps(a, b):
+    """(left, top, right, bottom) rectangles share an area."""
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _move_lands_on_picture(shape, new_left):
+    """Would moving `shape` to `new_left` put it over a picture of its slide
+    that it does not overlap where it stands?"""
+    try:
+        slide = shape.part.slide
+    except AttributeError:
+        return False
+    top, bottom = int(shape.top or 0), int((shape.top or 0) + (shape.height or 0))
+    here = (int(shape.left), top, int(shape.left + (shape.width or 0)), bottom)
+    moved = (int(new_left), top, int(new_left + (shape.width or 0)), bottom)
+    for pic in slide.shapes:
+        if pic.shape_type != MSO_SHAPE_TYPE.PICTURE or pic.left is None or not pic.width:
+            continue
+        rect = (int(pic.left), int(pic.top), int(pic.left + pic.width), int(pic.top + pic.height))
+        if _overlaps(moved, rect) and not _overlaps(here, rect):
+            return True
+    return False
 
 
 _SUBTITLE_SIZE_RATIO = 0.45
