@@ -1,4 +1,5 @@
 from common.json_utils import extract_json
+from common.prompt_files import load_prompt
 from common.model_fallback import TEXT_MODELS, VISION_MODELS, call_with_model_fallback
 from design_system.clustering import (
     cluster_slides,
@@ -19,29 +20,13 @@ ARCHETYPES = [
     "two_column_comparison", "image_caption", "quote", "agenda", "closing", "other",
 ]
 
-VISION_PROMPT = """Перед тобой рендер слайда презентации.
-Определи архетип слайда — строго одно значение из списка:
-{archetypes}
+# Moved to files (backlog item 9) byte-for-byte — verified against the inline
+# text of HEAD, so fingerprint_cache.CLASSIFIER_VERSION stays as it is. Any
+# EDIT of these files is a prompt change and must bump it.
+VISION_PROMPT = load_prompt("classify_slide_vision.v1.txt").replace(
+    "__ARCHETYPES__", ", ".join(ARCHETYPES))
 
-Ответь ТОЛЬКО валидным JSON без пояснений и markdown-разметки, по схеме:
-{{"archetype": "...", "regions": [{{"role": "...", "position": "..."}}]}}
-""".format(archetypes=", ".join(ARCHETYPES))
-
-TEXT_PROMPT_TEMPLATE = """Ниже — структурное описание слайда презентации (типы фигур, их
-расположение и текст), без изображения. Определи архетип слайда — строго одно значение из списка:
-__ARCHETYPES__
-
-Если структуры недостаточно, чтобы уверенно определить архетип (например, слайд состоит в основном
-из графики/картинок, которых в описании не видно), поставь "confidence": "low".
-
-Ответь ТОЛЬКО валидным JSON без пояснений и markdown-разметки, по схеме:
-{"archetype": "...", "confidence": "high" | "low"}
-
-Структура слайда:
----
-__DESCRIPTION__
----
-"""
+TEXT_PROMPT_TEMPLATE = load_prompt("classify_slide_text.v1.txt")
 
 
 def _largest_size_pt(shape):

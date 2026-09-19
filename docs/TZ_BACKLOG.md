@@ -163,14 +163,18 @@
    Сверить покрытие с Приложением 1 ТЗ; то, что в отчётах итераций поймал только
    глаз, — кандидаты в детерминированные проверки.
 8. `[ ]` **Экспорт .html и .pdf.** Сейчас только .pptx; pdf есть лишь как превью.
-9. `[~]` **Промпты и конфиги агентов в отдельные файлы с версиями.** Сейчас они в
-   коде: `content_parser/two_phase.py`, `content_parser/parser.py`,
-   `design_system/style_card.py`.
+9. `[x]` **Промпты и конфиги агентов в отдельные файлы с версиями.** Все шесть
+   модулей-источников переехали в `prompts/`; тест `test_no_prompt_is_left_inline`
+   не даёт завести новый промпт внутри кода.
    - `[x]` папка `prompts/` и загрузчик `common/prompt_files.load_prompt`;
      версия — в имени файла. Первый промпт — `shorten_items.v1.txt` (iter135).
    - `[x]` OUTLINE_PROMPT и BLOCK_PROMPTS (7 ролей) — в `prompts/outline.v1.txt`,
      `prompts/block_<роль>.v1.txt` (iter138); загруженный текст побайтно равен
      прежнему встроенному, тест держит файлы и подставляемые плейсхолдеры.
-   - `[ ]` промпты легаси-парсера (`content_parser/parser.py`) и `style_card`.
+   - `[x]` легаси-парсер (`schema_blocks`, `title_for_block`, `resize_block`),
+     `style_card` и классификатор шаблона (`classify_slide_vision`,
+     `classify_slide_text`) — iter140. Текст перенесён побайтно, поэтому
+     `CLASSIFIER_VERSION` и `STYLE_CARD_VERSION` не менялись; любая ПРАВКА этих
+     файлов — изменение промпта и обязана бампнуть версию.
 10. `[ ]` **Документация:** README, ARCHITECTURE, MODELS, AUDIT.
 11. `[ ]` **Задача со звёздочкой:** text-to-image ≤20B внутри слайда.

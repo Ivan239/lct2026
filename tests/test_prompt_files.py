@@ -10,7 +10,9 @@ would silently ship «__BRIEF__» to the model instead of the brief.
 import os
 
 from common.prompt_files import PROMPTS_DIR, load_prompt
+from content_parser import parser as legacy
 from content_parser import two_phase as tp
+from design_system import extractor, style_card
 
 SUBSTITUTED = {
     "outline": ("__MENU__", "__ROLES__", "__RANGE__", "__BRIEF__"),
@@ -51,6 +53,52 @@ def test_no_placeholder_survives_a_real_block_prompt():
 
     tp.generate_block(Client(), "bullet_list", "тема", "бриф", count=3, models=["m"], item_chars=28)
     assert seen and "__" not in seen[0], seen[0]
+
+
+def test_the_remaining_prompts_come_from_files_too():
+    """iter140: the legacy parser, the style card and the classifier. Their
+    text moved byte-for-byte, which is what lets CLASSIFIER_VERSION and
+    STYLE_CARD_VERSION stay put — a changed prompt would replay stale cached
+    labels and cards forever."""
+    assert legacy.SCHEMA_PROMPT == load_prompt("schema_blocks.v1.txt")
+    assert legacy.TITLE_PROMPT_TEMPLATE == load_prompt("title_for_block.v1.txt")
+    assert legacy.RESIZE_PROMPT_TEMPLATE == load_prompt("resize_block.v1.txt")
+    assert style_card.CARD_PROMPT == load_prompt("style_card.v1.txt")
+    assert extractor.TEXT_PROMPT_TEMPLATE == load_prompt("classify_slide_text.v1.txt")
+
+
+def test_the_vision_prompt_lists_the_archetypes():
+    """It is the one prompt built by substitution at import: the file carries
+    __ARCHETYPES__, and a renamed placeholder would ship the literal to the
+    model."""
+    assert "__" not in extractor.VISION_PROMPT, extractor.VISION_PROMPT
+    for archetype in extractor.ARCHETYPES:
+        assert archetype in extractor.VISION_PROMPT, archetype
+
+
+def test_the_legacy_prompts_keep_their_placeholders():
+    assert "__BLOCK__" in legacy.TITLE_PROMPT_TEMPLATE
+    for placeholder in ("__BLOCK__", "__COUNT__", "__FIELD__"):
+        assert placeholder in legacy.RESIZE_PROMPT_TEMPLATE, placeholder
+    for placeholder in ("__DESCRIPTIONS__", "__MEASURED__"):
+        assert placeholder in style_card.CARD_PROMPT, placeholder
+    for placeholder in ("__ARCHETYPES__", "__DESCRIPTION__"):
+        assert placeholder in extractor.TEXT_PROMPT_TEMPLATE, placeholder
+
+
+def test_no_prompt_is_left_inline():
+    """The point of item 9: swapping a prompt for another model must not need a
+    code edit. A new triple-quoted prompt in these modules would undo it."""
+    import inspect
+
+    for module in (tp, legacy, extractor, style_card):
+        source = inspect.getsource(module)
+        for line in source.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("#"):
+                continue
+            assert not (("PROMPT" in stripped or "PROMPTS" in stripped)
+                        and '"""' in stripped and "=" in stripped), (module.__name__, line)
 
 
 def test_prompt_files_are_versioned():

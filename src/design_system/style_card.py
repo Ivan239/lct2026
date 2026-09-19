@@ -14,32 +14,16 @@ import os
 
 from common.json_utils import extract_json
 from common.model_fallback import TEXT_MODELS, call_with_model_fallback
+from common.prompt_files import load_prompt
 
 # Bump on ANY change to the prompt or card schema — same poisoning story as
 # fingerprint_cache.CLASSIFIER_VERSION: stale cached cards would otherwise
 # replay an outdated design brief forever.
 STYLE_CARD_VERSION = 1
 
-CARD_PROMPT = """Ты — арт-директор. По структурному описанию слайдов шаблона презентации
-составь краткий дизайн-бриф этого шаблона для копирайтера, который будет писать
-тексты новых слайдов в этом шаблоне.
-
-Описание слайдов шаблона (роли, размеры боксов, примеры текстов-заглушек):
----
-__DESCRIPTIONS__
----
-
-Измеренные факты (уже известны, не повторяй их, используй как контекст):
-__MEASURED__
-
-Ответь ТОЛЬКО валидным JSON без пояснений и markdown:
-{
-  "tone": "тон текстов в 3-6 словах (например: деловой и лаконичный)",
-  "metaphor": "визуальная метафора/характер шаблона в одной короткой фразе, или null",
-  "length_norms": {"title": "N-M слов", "bullet": "N-M слов", "subtitle": "N-M слов"},
-  "avoid": ["чего избегать в текстах, 1-3 коротких пункта"]
-}
-"""
+# The move to a file kept the text byte-for-byte, so the version above
+# stays; editing the file is a prompt change and must bump it.
+CARD_PROMPT = load_prompt("style_card.v1.txt")
 
 
 def _measured_summary(profile, archetype_map):

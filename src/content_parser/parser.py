@@ -2,40 +2,9 @@ import json
 
 from common.json_utils import extract_json
 from common.model_fallback import TEXT_MODELS, call_with_model_fallback
+from common.prompt_files import load_prompt
 
-SCHEMA_PROMPT = """Ты помогаешь превратить сырой бриф о продукте в структурированный план презентации.
-
-Разбей текст на блоки контента. Каждый блок должен иметь один из типов:
-- title: {"type": "title", "title": "...", "subtitle": "..."}
-- section_divider: {"type": "section_divider", "title": "..."} — короткая крупная фраза-переход
-  между смысловыми разделами презентации. НЕ БОЛЕЕ ОДНОГО такого блока на всю презентацию,
-  и только если содержание реально делится на два крупных, непохожих раздела (например
-  "Проблема" и "Решение"). Для короткого питча (как большинство брифов) этот тип обычно вообще
-  не нужен — пропусти его, если не уверен, что он оправдан. Не вставляй его перед каждым блоком.
-- bullet_list: {"type": "bullet_list", "title": "...", "bullets": ["...", "...", "..."]} (ровно 3 буллета)
-- stats_kpi: {"type": "stats_kpi", "title": "...", "stats": [["число", "подпись"], ...]} (ровно 3 пары)
-- two_column_comparison: {"type": "two_column_comparison", "title": "...",
-  "left_heading": "...", "left_points": ["...", "...", "..."],
-  "right_heading": "...", "right_points": ["...", "...", "..."]} (ровно по 3 пункта в колонке)
-- closing: {"type": "closing", "title": "...", "subtitle": "..."} — финальный слайд презентации
-  (благодарность, призыв к действию, контакты). Используй как последний блок, если брифу
-  естественно подходит завершение питча.
-
-Всегда начинай с одного блока title. Порядок остальных блоков — как логично для питча.
-Если брифу естественно подходит финальный слайд — заверши блоком closing.
-
-ВАЖНО: у каждого блока bullet_list, stats_kpi, two_column_comparison и closing ОБЯЗАТЕЛЬНО
-должно быть непустое поле "title" со своим конкретным заголовком — даже если непосредственно
-перед этим блоком стоит section_divider. section_divider — это только переход между разделами,
-он НЕ заменяет и не отменяет заголовок следующего за ним слайда.
-
-Ответь ТОЛЬКО валидным JSON-массивом блоков, без пояснений и markdown-разметки.
-
-Бриф:
----
-__BRIEF__
----
-"""
+SCHEMA_PROMPT = load_prompt("schema_blocks.v1.txt")
 
 
 MAX_SECTION_DIVIDERS = 1
@@ -87,13 +56,7 @@ def parse_brief(client, brief_text, models=TEXT_MODELS):
     return blocks
 
 
-TITLE_PROMPT_TEMPLATE = """Вот блок контента презентации в формате JSON, без заголовка:
----
-__BLOCK__
----
-Придумай короткий, конкретный заголовок (title) для этого слайда, отражающий его содержание.
-Ответь ТОЛЬКО текстом заголовка, одной строкой, без кавычек и пояснений.
-"""
+TITLE_PROMPT_TEMPLATE = load_prompt("title_for_block.v1.txt")
 
 
 def _ensure_title(client, block, models=TEXT_MODELS):
@@ -119,20 +82,7 @@ def _ensure_title(client, block, models=TEXT_MODELS):
     return block
 
 
-RESIZE_PROMPT_TEMPLATE = """Вот блок контента презентации в формате JSON:
----
-__BLOCK__
----
-
-На конкретном слайде шаблона реально помещается ровно __COUNT__ элемент(ов) в поле "__FIELD__"
-(а не столько, сколько сейчас в блоке). Перепиши этот блок так, чтобы в поле "__FIELD__" было
-ТОЧНО __COUNT__ элементов — не больше и не меньше, сохранив общий смысл и стиль. Если нужно
-больше элементов, чем есть сейчас — раздели существующие мысли на более конкретные или добавь
-логичное продолжение по смыслу блока. Если нужно меньше — объедини наиболее важные.
-Остальные поля блока оставь как есть.
-
-Ответь ТОЛЬКО валидным JSON-объектом блока (тот же формат, что во входе), без пояснений и markdown.
-"""
+RESIZE_PROMPT_TEMPLATE = load_prompt("resize_block.v1.txt")
 
 # Which field holds "the list whose length must match slide capacity" per type.
 RESIZE_FIELD_BY_TYPE = {
