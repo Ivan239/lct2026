@@ -443,10 +443,28 @@ def _is_placeholder_text(text):
     return norm in PLACEHOLDER_LABELS or bool(PLACEHOLDER_PATTERNS.search(norm))
 
 
+def _table_cell_texts(shapes):
+    """Text of every cell of every native table, groups opened.
+
+    A table is a graphicFrame, not a text frame, so the walk above never saw
+    its cells: on WorkSpace a synthesized slide and the closing were drawn on a
+    table canvas whose twenty «Текст» cells shipped untouched under our text,
+    and the harness scored that deck 97.4 with «заглушек шаблона нет»
+    (iter125, iter131)."""
+    from generator.slide_kit import placed_shapes
+
+    for s in placed_shapes(shapes):
+        if getattr(s, "has_table", False) and s.has_table:
+            for row in s.table.rows:
+                for cell in row.cells:
+                    yield cell.text
+
+
 def placeholder_hits(slide):
-    """Placeholder strings left on the slide, groups included."""
-    return [s.text_frame.text.strip() for s in _iter_text_shapes_deep(slide.shapes)
-            if _is_placeholder_text(s.text_frame.text)]
+    """Placeholder strings left on the slide, groups and table cells included."""
+    texts = [s.text_frame.text for s in _iter_text_shapes_deep(slide.shapes)]
+    texts += list(_table_cell_texts(slide.shapes))
+    return [t.strip() for t in texts if _is_placeholder_text(t)]
 
 
 # «Все цифры и факты со слайда есть в исходных материалах?» — Appendix 1 of the
