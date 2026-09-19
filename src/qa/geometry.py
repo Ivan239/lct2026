@@ -285,7 +285,20 @@ def keep_text_inside_slide(prs, resolver, slide_indices=None):
         for shape in texts_shapes:
             if int(shape.left + shape.width) <= slide_width:
                 continue
-            if not shape.text_frame.word_wrap or not _left_aligned(shape):
+            if not shape.text_frame.word_wrap:
+                continue
+            if not _left_aligned(shape):
+                # A CENTRED box may not be narrowed — that moves the centre the
+                # designer aligned to something (VK Tech's funnel numbers sit in
+                # boxes that overhang by 0.1-0.5in). Slide the whole box back
+                # inside instead: its own width and size survive, and only our
+                # text moves. «Среднее время поиска: 31 секунда» ran off the
+                # right edge of the funnel slide otherwise (iter141/143).
+                shift = int(shape.left + shape.width) - right_bound
+                if int(shape.left) - shift < min(lefts):
+                    continue
+                shape.left = Emu(int(shape.left) - shift)
+                changed.append((slide_idx, shape.shape_id))
                 continue
             width = right_bound - int(shape.left)
             if width < SIDE_ART_MIN_CLEAR_FRACTION * int(shape.width):
