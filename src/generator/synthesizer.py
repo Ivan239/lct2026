@@ -10,7 +10,7 @@ from pptx.enum.text import PP_ALIGN
 from pptx.util import Emu, Inches, Pt
 
 from generator.deck_style import _luminance, _slide_bg_hex
-from generator.slide_kit import clone_slide, content_text_shapes
+from generator.slide_kit import clone_slide, content_groups, content_text_shapes
 from generator.text_fit import (SINGLE_LINE_SAFETY, cap_size_to_longest_word,
                                 estimate_block_height_in, fit_font_size)
 
@@ -440,7 +440,9 @@ def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None)
         slide = prs.slides[idx]
         palette = _recolor_for_canvas(_theme_palette(theme),
                                       canvas_bg if canvas_bg is not None else _slide_bg_hex(slide))
-        removed = content_text_shapes(slide)
+        # Content groups go with the text boxes: a card group left behind is
+        # the template's placeholder card under our content (iter105).
+        removed = content_text_shapes(slide) + content_groups(slide)
         placed = [s for s in removed if s.left is not None and s.top is not None and s.width and s.height]
         # Before any geometry is measured: a marker column is not decor to keep
         # clear of, it is debris of the text being stripped. Dropping it later

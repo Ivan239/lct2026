@@ -62,6 +62,37 @@ def content_text_shapes(slide, claimed_ids=()):
     ]
 
 
+def _group_has_text(group):
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+    for child in group.shapes:
+        if child.shape_type == MSO_SHAPE_TYPE.GROUP:
+            if _group_has_text(child):
+                return True
+        elif getattr(child, "has_text_frame", False) and child.text_frame.text.strip():
+            return True
+    return False
+
+
+def content_groups(slide):
+    """Top-level GROUPS that carry the slide's own content text.
+
+    text_shapes() sees only the top level of slide.shapes, so a template that
+    keeps each card as a group (VK Tech: icon + «Заголовок / Подзаголовок /
+    Текст» ×7 per card) hands its whole content past every caller. A canvas
+    cloned for synthesis then kept four placeholder cards under our title and
+    image frame (iter102, iter105). A group in the chrome band is furniture and
+    is not returned; chrome is judged on the GROUP's own box, since a child's
+    coordinates live in the group's space, not the slide's."""
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+    height = slide_height(slide)
+    return [
+        s for s in slide.shapes
+        if s.shape_type == MSO_SHAPE_TYPE.GROUP
+        and not is_chrome_shape(s, height)
+        and _group_has_text(s)
+    ]
+
+
 def clone_slide(prs, source_idx):
     """Duplicates a template slide (shapes, images, formatting) as a new slide
     at the end of the deck, returns its index. Exists so a deck that needs two
