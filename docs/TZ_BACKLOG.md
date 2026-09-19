@@ -162,7 +162,9 @@
    `design_system/style_card.py`.
    - `[x]` папка `prompts/` и загрузчик `common/prompt_files.load_prompt`;
      версия — в имени файла. Первый промпт — `shorten_items.v1.txt` (iter135).
-   - `[ ]` перенести OUTLINE_PROMPT и BLOCK_PROMPTS, промпты парсера и
-     style_card.
+   - `[x]` OUTLINE_PROMPT и BLOCK_PROMPTS (7 ролей) — в `prompts/outline.v1.txt`,
+     `prompts/block_<роль>.v1.txt` (iter138); загруженный текст побайтно равен
+     прежнему встроенному, тест держит файлы и подставляемые плейсхолдеры.
+   - `[ ]` промпты легаси-парсера (`content_parser/parser.py`) и `style_card`.
 10. `[ ]` **Документация:** README, ARCHITECTURE, MODELS, AUDIT.
 11. `[ ]` **Задача со звёздочкой:** text-to-image ≤20B внутри слайда.
