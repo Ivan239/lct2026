@@ -778,7 +778,15 @@ def _find_bullet_icons(slide, body_shape):
     graphics instead of a real PowerPoint bullet character. These are separate,
     independently-positioned shapes — they don't reflow when the text does, so
     filling different text into the body without moving them the same amount
-    leaves icons pointing at the wrong line (or no line at all)."""
+    leaves icons pointing at the wrong line (or no line at all).
+
+    Small in BOTH dimensions. With the width checked alone, the bars of a
+    chart built from pictures passed for icons: VK Tech's chart slide has 22
+    bars 0.76in wide and 1.75–3.29in tall, the filler moved them line by line
+    and deleted the «surplus» — 19 of 22 — leaving the chart's white value
+    labels white on white (iter108). Measured over the corpus: every other
+    picture under 1in wide is at most 0.95in tall; the bars are the only
+    narrow pictures taller than 1in."""
     if body_shape is None or body_shape.left is None:
         return []
     icon_max_size = Emu(int(Inches(1.0)))
@@ -787,6 +795,7 @@ def _find_bullet_icons(slide, body_shape):
         if s.shape_type == MSO_SHAPE_TYPE.PICTURE
         and s.left is not None and s.top is not None
         and s.width and s.width < icon_max_size
+        and s.height and s.height < icon_max_size
         and s.left <= body_shape.left
     ]
     candidates.sort(key=lambda s: s.top)
