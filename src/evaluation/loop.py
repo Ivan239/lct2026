@@ -274,7 +274,8 @@ def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_p
     return plan, skipped
 
 
-def run_iteration(client, model, source_pptx, brief, source_name=None, out_root=LOOP_ROOT):
+def run_iteration(client, model, source_pptx, brief, source_name=None, out_root=LOOP_ROOT,
+                  source_numbers=None):
     """Full turn for one model. `client` parses the template and generates the
     deck. Scoring is deterministic-only here (no LLM judge call, ever — Claude
     reviews the renders and calls evaluation.claude_review.apply_claude_scores
@@ -282,7 +283,11 @@ def run_iteration(client, model, source_pptx, brief, source_name=None, out_root=
     same PNGs serve both the eval JSON and Claude's visual review — no second
     render. Returns a bundle: template info, deck path, the rubric evaluation,
     and what was skipped. Raises only on a hard failure that leaves no deck to
-    score (the caller records that and moves on)."""
+    score (the caller records that and moves on).
+
+    `source_numbers` — a content package's `numbers`, the reference for
+    «все цифры есть в исходных материалах»; None means the brief is the whole
+    source."""
     source_name = source_name or os.path.splitext(os.path.basename(source_pptx))[0]
     t = ensure_template(client, model, source_pptx, source_name, out_root=out_root)
 
@@ -299,7 +304,8 @@ def run_iteration(client, model, source_pptx, brief, source_name=None, out_root=
 
     look_dir = os.path.join(t["workdir"], "decks", f"look_deck_{ts}")
     result = evaluate_deck(out_pptx, brief, slide_roles=slide_roles,
-                           render_dir=look_dir, label=f"{safe_model(model)}_{ts}")
+                           render_dir=look_dir, label=f"{safe_model(model)}_{ts}",
+                           source_numbers=source_numbers)
     # How much of the TEMPLATE the deck actually got to use. Worth surfacing
     # every run: on the two real customer decks the answer is "almost none" and
     # nothing said so. 58% of survey-31 and 62% of survey-69 are forced to

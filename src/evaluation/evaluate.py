@@ -40,21 +40,31 @@ def _slide_texts(pptx_path):
 
 
 def evaluate_deck(pptx_path, brief, slide_roles=None, render_dir=None,
-                  out_json=None, label=None):
+                  out_json=None, label=None, source_numbers=None):
     """Deterministic half of the rubric, always: geometric/typographic checks,
     render-based contrast, and N/A-gating for image/infographic criteria the
     deck doesn't even have the media for. Every llm-mode criterion starts as
     "ожидает оценки Клода" — call claude_review.apply_claude_scores afterward
     with Claude's own judgment to fill those in and get a real total_100.
 
+    `source_numbers` — the numbers of the source materials, as
+    content_package.extract_numbers normalises them: a content package's
+    `numbers`. None means the brief is the whole source, and its numbers are
+    extracted from it.
+
     Renders the deck once and records the PNG paths in the result so the caller
     (and Claude, reviewing them) doesn't need to render a second time."""
+    from content_package import extract_numbers
+
     render_dir = render_dir or os.path.join(EVAL_DIR, "_render")
     os.makedirs(render_dir, exist_ok=True)
     os.makedirs(EVAL_DIR, exist_ok=True)
 
     scores = {}
     scores.update(deterministic.evaluate(pptx_path, slide_roles=slide_roles))
+    if source_numbers is None:
+        source_numbers = extract_numbers(brief or "")
+    scores["dop_numbers_sourced"] = deterministic.numbers_sourced_score(pptx_path, source_numbers)
 
     png_paths = render_pptx_to_pngs(pptx_path, render_dir)
 

@@ -82,6 +82,7 @@ CRITERIA = {
     "dop_noise": ("Умеренное количество объектов", "det"),
     "dop_pacing": ("Единый темп презентации", "det"),
     "dop_no_placeholders": ("Нет текста-заглушки шаблона", "det"),
+    "dop_numbers_sourced": ("Все цифры есть в исходных материалах", "det"),
 }
 
 # Seven weighted buckets from the rubric's final table. weight sums to 1.0.
@@ -103,7 +104,8 @@ BUCKETS = {
     "content": {
         "title": "Контент",
         "weight": 0.25,
-        "criteria": ["2.1", "2.2", "2.3", "5.2", "5.3", "5.4", "5.5", "5.6"],
+        "criteria": ["2.1", "2.2", "2.3", "5.2", "5.3", "5.4", "5.5", "5.6",
+                     "dop_numbers_sourced"],
     },
     "structure": {
         "title": "Структура презентации",

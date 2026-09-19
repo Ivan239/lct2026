@@ -435,6 +435,94 @@ def placeholder_hits(slide):
             if _is_placeholder_text(s.text_frame.text)]
 
 
+# «Все цифры и факты со слайда есть в исходных материалах?» — Appendix 1 of the
+# VK Tech brief. Until iter108 only the eye checked it: iter105 found «+5
+# позиций» and «средний чек +12%» by reading the slides, and iter108's deck
+# carried fifteen numbers against a brief with none, at 89.4 from the harness.
+#
+# A bare integer up to this value, with no sign and no unit, is an ordinal or
+# an enumerator («01», «шаг 3»), not a claim; with a unit or a sign («3 дня»,
+# «+5») it is a claim and is checked.
+_BARE_ORDINAL_MAX = 10
+_NUMBER_PARTS = re.compile(r"([+\-]?)(\d+(?:\.\d+)?)(.*)")
+
+
+def _number_value(token):
+    """(value, is_claim) of a token from content_package.extract_numbers."""
+    match = _NUMBER_PARTS.fullmatch(token)
+    if not match:
+        return None, False
+    sign, digits, unit = match.groups()
+    value = float(digits)
+    claim = bool(sign or unit or "." in digits or value > _BARE_ORDINAL_MAX)
+    return value, claim
+
+
+def _slide_fact_texts(slide):
+    """Every piece of content text on the slide as the reader sees it: groups
+    opened, table cells read (both invisible to the top-level criteria —
+    iter105, iter107), chrome skipped (page numbers, «2025» in the corner are
+    the template's furniture, not claims). Chrome is judged by the top-level
+    box: coordinates inside a group live in the group's own space."""
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+    height = slide_height(slide)
+    texts = []
+
+    def walk(shapes):
+        for s in shapes:
+            if s.shape_type == MSO_SHAPE_TYPE.GROUP:
+                walk(s.shapes)
+            elif getattr(s, "has_table", False) and s.has_table:
+                texts.extend(cell.text for row in s.table.rows for cell in row.cells)
+            elif getattr(s, "has_text_frame", False) and s.has_text_frame:
+                texts.append(s.text_frame.text)
+
+    walk([s for s in slide.shapes if not is_chrome_shape(s, height)])
+    return texts
+
+
+def unsourced_numbers(pptx_path, source_numbers):
+    """Numbers on the slides that the source materials do not contain.
+
+    `source_numbers` — normalised tokens from content_package.extract_numbers
+    (a package's `numbers`, or the numbers of the brief). Compared by VALUE:
+    «+25 %» in the brief and «25%» on a slide are the same claim, and a sign or
+    a unit is how the model rephrases, not what it invents. Returns
+    [(slide_no, token)], each token once per slide."""
+    from content_package import extract_numbers
+
+    known = {v for v, _ in map(_number_value, source_numbers) if v is not None}
+    found = []
+    for number, slide in enumerate(Presentation(pptx_path).slides, 1):
+        seen = set()
+        for text in _slide_fact_texts(slide):
+            for token in extract_numbers(text):
+                value, claim = _number_value(token)
+                if value is None or not claim or value in known or token in seen:
+                    continue
+                seen.add(token)
+                found.append((number, token))
+    return found
+
+
+def numbers_sourced_score(pptx_path, source_numbers):
+    """dop_numbers_sourced. Categorical per number, not a share: one invented
+    figure on a slide the client reads is a defect whatever the deck's size
+    (the lesson of 9.1 — a share rounded one bad box out of fifteen to 5/5)."""
+    found = unsourced_numbers(pptx_path, source_numbers)
+    distinct = {token for _, token in found}
+    if not distinct:
+        return {"score": 5, "detail": "все цифры на слайдах есть в исходных материалах"}
+    score = 3 if len(distinct) == 1 else 2 if len(distinct) <= 3 else 1
+    by_slide = {}
+    for number, token in found:
+        by_slide.setdefault(number, []).append(token)
+    listed = "; ".join(f"слайд {n}: {', '.join(tokens)}" for n, tokens in sorted(by_slide.items()))
+    return {"score": score,
+            "detail": f"{len(distinct)} цифр нет в исходных материалах — {listed}"}
+
+
 def evaluate(pptx_path, slide_roles=None):
     """slide_roles: optional {0-based position: role_str} so completeness can
     check the deck actually ends on a closing/summary. Returns

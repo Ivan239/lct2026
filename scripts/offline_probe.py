@@ -46,6 +46,7 @@ from pptx import Presentation  # noqa: E402
 from pptx.util import Emu  # noqa: E402
 
 from common.synthesis import SYNTHESIZE  # noqa: E402
+from content_package import extract_numbers  # noqa: E402
 from content_parser.two_phase import _enforce_text_budgets, bullet_char_budget  # noqa: E402
 from design_system.style_profile import build_measured_profile  # noqa: E402
 from evaluation.evaluate import evaluate_deck  # noqa: E402
@@ -151,6 +152,25 @@ SHORT = {
                       "image": "экран дашборда"},
     "closing": {"type": "closing", "title": "Запустим пилот", "subtitle": "Две недели"},
 }
+
+
+def _plan_numbers(plan):
+    """Every number in the plan's blocks, normalised as the audit compares them."""
+    numbers = []
+
+    def walk(value):
+        if isinstance(value, str):
+            numbers.extend(extract_numbers(value))
+        elif isinstance(value, dict):
+            for item in value.values():
+                walk(item)
+        elif isinstance(value, (list, tuple)):
+            for item in value:
+                walk(item)
+
+    for block, _ in plan:
+        walk(block)
+    return numbers
 
 
 def _classified(archetypes):
@@ -735,8 +755,11 @@ def probe(name, template_id, blocks, out_root, outline=OUTLINE, stamp=None):
     # thirty-five iterations, which made every dop_distribution/dop_pacing
     # number in those reports pessimistic.
     slide_roles = {pos: block["type"] for pos, (block, _) in enumerate(plan)}
+    # The fixture's own content is the probe's source material: a number on a
+    # slide that the plan did not put there is a leftover of the template (a
+    # designer's «-40%» in an unfilled box) or one the generator mangled.
     result = evaluate_deck(deck, brief="offline probe", label=f"probe_{name}",
-                           slide_roles=slide_roles,
+                           slide_roles=slide_roles, source_numbers=_plan_numbers(plan),
                            render_dir=os.path.join(out_dir, "render"),
                            out_json=os.path.join(out_dir, "eval.json"))
     native = sum(1 for _, idx in plan if idx != SYNTHESIZE)
