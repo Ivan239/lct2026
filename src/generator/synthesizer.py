@@ -297,6 +297,52 @@ def _clip_to_side_decor(bounds, slide, slide_width, slide_height):
     return dict(bounds, left=Emu(left), right=Emu(right))
 
 
+# A side panel is a big picture — wider than a decor strip — that is not the
+# full-bleed backdrop everything sits on.
+_BACKDROP_AREA_FRACTION = 0.9
+# Narrowing to the panel is only worth it while a real column remains; iter71
+# measured what squeezing into narrow columns costs (text pushed off the slide).
+_PANEL_MIN_KEPT_FRACTION = 0.4
+
+
+def _clip_to_side_panel(bounds, slide, slide_width, slide_height):
+    """End the content band at a big picture standing at its side.
+
+    _clip_to_side_decor steps around narrow strips only; anything above 20% of
+    the slide it leaves alone as a background. VK Education's title-style
+    layout carries a 6.74in art panel from x 6.60in — 45% of the slide, as a
+    LAYOUT picture — and a synthesized slide on that canvas drew its title
+    («CRM migration sta…») under the panel's white shapes and the image frame
+    across it (iter127). A picture that starts inside the band and covers most
+    of its height is the other half of the layout, not a backdrop: the band
+    stops at its edge. The full-bleed backdrop (T-Zh folders) is left alone —
+    every box lies on it."""
+    left, right = int(bounds["left"]), int(bounds["right"])
+    top, bottom = int(bounds["top"]), int(bounds["bottom"])
+    band = max(1, bottom - top)
+    area = (slide_width or 1) * (slide_height or 1)
+    max_strip = int(slide_width * _SIDE_STRIP_MAX_WIDTH_FRACTION)
+    new_left, new_right = left, right
+    for pic in _canvas_pictures(slide):
+        if None in (pic.left, pic.top) or not (pic.width and pic.height):
+            continue
+        if pic.width <= max_strip or (pic.width * pic.height) / area >= _BACKDROP_AREA_FRACTION:
+            continue
+        covered = min(int(pic.top + pic.height), bottom) - max(int(pic.top), top)
+        if covered / band < _SIDE_STRIP_MIN_COVERAGE:
+            continue
+        p_left, p_right = int(pic.left), int(pic.left + pic.width)
+        if left < p_left < right and p_right >= right:      # panel on the right
+            new_right = min(new_right, p_left - _CHROME_GAP_EMU)
+        elif left < p_right < right and p_left <= left:     # panel on the left
+            new_left = max(new_left, p_right + _CHROME_GAP_EMU)
+    if (new_left, new_right) == (left, right):
+        return bounds
+    if new_right - new_left < (right - left) * _PANEL_MIN_KEPT_FRACTION:
+        return bounds  # the panel IS the slide; nothing usable beside it
+    return dict(bounds, left=Emu(new_left), right=Emu(new_right))
+
+
 def _clip_to_canvas_chrome(bounds, slide, slide_height):
     """Keep template-wide bounds clear of the furniture the CANVAS still carries.
 
@@ -477,6 +523,7 @@ def _prepare_blank_slide(prs, theme, bounds_in, canvas_idx=None, canvas_bg=None)
         bounds = _widen_to_template_if_clear(
             bounds, _resolve_bounds(prs, bounds_in), slide, prs.slide_width, prs.slide_height)
         bounds = _clip_to_side_decor(bounds, slide, prs.slide_width, prs.slide_height)
+        bounds = _clip_to_side_panel(bounds, slide, prs.slide_width, prs.slide_height)
         for shape in removed:
             shape._element.getparent().remove(shape._element)
         _blank_ownerless_chrome(slide, prs.slide_height)
