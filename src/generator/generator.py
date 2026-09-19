@@ -130,11 +130,31 @@ def _pick_title_shape(slide, claimed_ids):
     return max(candidates, key=score)
 
 
+def _body_placeholders(slide, claimed_ids):
+    from pptx.enum.shapes import PP_PLACEHOLDER
+    return [ph for ph in slide.placeholders
+            if ph.shape_id not in claimed_ids and ph.has_text_frame
+            and ph.placeholder_format.type in (PP_PLACEHOLDER.BODY, PP_PLACEHOLDER.OBJECT)]
+
+
 def _pick_body_shape(slide, claimed_ids):
     """Prefer the native content placeholder; otherwise the remaining text shape
-    with the most paragraphs is the best guess for "the body text"."""
+    with the most paragraphs is the best guess for "the body text".
+
+    idx 1 is the first body placeholder, not always the body: VK Tech's contents
+    slide has a one-line label «Содержание» at idx 1 over a four-item list at
+    idx 2. The label was taken for the body — capacity 1, the list blanked, the
+    single bullet cut to «Средне» (iter123). Another body placeholder holding
+    MORE content slots is the body; on ties idx 1 keeps it. Measured over the
+    corpus this moves exactly that slide and the two-column slide of the
+    startup/corporate fixtures (column header 1 slot, its items 3)."""
     native = _placeholder(slide, 1, claimed_ids)
     if native is not None:
+        richer = [ph for ph in _body_placeholders(slide, claimed_ids)
+                  if len(_content_slot_indices(ph)) > len(_content_slot_indices(native))]
+        if richer:
+            return max(richer, key=lambda ph: (len(_content_slot_indices(ph)),
+                                               -ph.placeholder_format.idx))
         return native
     candidates = _content_text_shapes(slide, claimed_ids)
     if not candidates:
@@ -700,12 +720,19 @@ def _align_left_edges(anchor_shape, *other_shapes, tolerance_emu=45720):
     A cap on the shift is not the answer — one was tried and reverted: a body
     returned to its own column hung in an empty slide (CLAUDE.md). The rule is
     about the cause: the box stays where it is when moving it would put it over
-    a picture it does not touch now."""
+    a picture it does not touch now.
+
+    Nor onto the anchor itself: a box in the column BESIDE the title is not a
+    slip. VK Tech's contents slide keeps the list at 5.07in right of a title
+    ending at 4.79in; aligned, the label above the list printed through the
+    title («Средне» over «Проблема…», iter123)."""
     if anchor_shape is None or anchor_shape.left is None:
         return
     for shape in other_shapes:
         if shape is not None and shape.left is not None and abs(shape.left - anchor_shape.left) > tolerance_emu:
             if _move_lands_on_picture(shape, anchor_shape.left):
+                continue
+            if _move_lands_on(shape, anchor_shape.left, anchor_shape):
                 continue
             shape.left = anchor_shape.left
 
@@ -713,6 +740,21 @@ def _align_left_edges(anchor_shape, *other_shapes, tolerance_emu=45720):
 def _overlaps(a, b):
     """(left, top, right, bottom) rectangles share an area."""
     return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
+
+def _rect(shape):
+    return (int(shape.left), int(shape.top or 0),
+            int(shape.left + (shape.width or 0)), int((shape.top or 0) + (shape.height or 0)))
+
+
+def _move_lands_on(shape, new_left, other):
+    """Would moving `shape` to `new_left` put it over `other`, which it does
+    not overlap where it stands?"""
+    if other.left is None or not other.width:
+        return False
+    here = _rect(shape)
+    moved = (int(new_left), here[1], int(new_left) + here[2] - here[0], here[3])
+    return _overlaps(moved, _rect(other)) and not _overlaps(here, _rect(other))
 
 
 def _move_lands_on_picture(shape, new_left):
