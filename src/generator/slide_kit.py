@@ -39,6 +39,52 @@ def text_shapes(slide):
     ]
 
 
+class PlacedShape:
+    """A shape inside a GROUP, with its box where the slide draws it.
+
+    python-pptx reports a group member's position in the group's OWN
+    coordinate space (chOff/chExt), not the slide's: of the 25 groups in VK
+    Tech and VK Education only one maps 1:1. Every geometric reader — edges,
+    margins, text bands, the pixels under a box — needs slide coordinates.
+    Everything else (text, runs, insets, shape_id) is the real shape's. Font
+    sizes are not scaled: a group transform resizes boxes, not the text."""
+
+    def __init__(self, shape, left, top, width, height):
+        self._shape = shape
+        self.left, self.top = Emu(int(left)), Emu(int(top))
+        self.width, self.height = Emu(int(width)), Emu(int(height))
+
+    def __getattr__(self, name):
+        return getattr(self._shape, name)
+
+
+def _group_transform(group):
+    """(x, y, w, h) in the group's child space -> in its parent's space."""
+    xfrm = group._element.grpSpPr.xfrm
+    if (xfrm is None or xfrm.off is None or xfrm.ext is None or xfrm.chOff is None
+            or xfrm.chExt is None or not xfrm.chExt.cx or not xfrm.chExt.cy):
+        return lambda x, y, w, h: (x, y, w, h)
+    sx, sy = xfrm.ext.cx / xfrm.chExt.cx, xfrm.ext.cy / xfrm.chExt.cy
+    ox, oy, cx, cy = xfrm.off.x, xfrm.off.y, xfrm.chOff.x, xfrm.chOff.y
+    return lambda x, y, w, h: (ox + (x - cx) * sx, oy + (y - cy) * sy, w * sx, h * sy)
+
+
+def placed_shapes(shapes, place=None):
+    """Every non-group shape, groups opened recursively, each at its place on
+    the slide. Top-level shapes come back as they are."""
+    from pptx.enum.shapes import MSO_SHAPE_TYPE
+    for s in shapes:
+        if s.shape_type == MSO_SHAPE_TYPE.GROUP:
+            inner = _group_transform(s)
+            composed = inner if place is None else (
+                lambda x, y, w, h, i=inner, o=place: o(*i(x, y, w, h)))
+            yield from placed_shapes(s.shapes, composed)
+        elif place is None or None in (s.left, s.top, s.width, s.height):
+            yield s
+        else:
+            yield PlacedShape(s, *place(s.left, s.top, s.width, s.height))
+
+
 def slide_height(slide):
     return slide.part.package.presentation_part.presentation.slide_height
 

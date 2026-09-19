@@ -133,10 +133,13 @@ INVISIBLE_MAX_DISTANCE = 120
 
 
 def _declared_run_colours(slide):
-    """[(text_length, (r,g,b))] for runs with an EXPLICIT rgb colour."""
+    """[(text_length, (r,g,b))] for runs with an EXPLICIT rgb colour, groups
+    opened — VK Tech keeps its cards as groups."""
+    from generator.slide_kit import placed_shapes
+
     out = []
-    for shape in slide.shapes:
-        if not shape.has_text_frame:
+    for shape in placed_shapes(slide.shapes):
+        if not getattr(shape, "has_text_frame", False) or not shape.has_text_frame:
             continue
         for para in shape.text_frame.paragraphs:
             for run in para.runs:
@@ -292,6 +295,8 @@ def evaluate_boxed_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATIO):
     can stand in for it. A slide's ratio is its WORST measurable box."""
     from pptx import Presentation
 
+    from generator.slide_kit import placed_shapes
+
     prs = Presentation(pptx_path)
     size = (prs.slide_width, prs.slide_height)
     per, low, blind, blind_why = [], [], [], []
@@ -305,8 +310,13 @@ def evaluate_boxed_contrast(pptx_path, png_paths, threshold=LOW_CONTRAST_RATIO):
             img = raw.convert("RGB")
             worst, flagged, unmeasured = None, False, 0
             why = []
-            for shape in slide.shapes:
-                if not shape.has_text_frame or not shape.text_frame.text.strip():
+            # Groups opened and each member measured where the slide draws
+            # it: a group's members report positions in its own coordinate
+            # space, and on VK Tech's team slide those run to 11.4in down a
+            # 5.6in slide — the pixels under that box are not its pixels.
+            for shape in placed_shapes(slide.shapes):
+                if (not getattr(shape, "has_text_frame", False) or not shape.has_text_frame
+                        or not shape.text_frame.text.strip()):
                     continue
                 if None in (shape.left, shape.top) or not (shape.width and shape.height):
                     continue
