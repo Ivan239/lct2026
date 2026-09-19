@@ -228,13 +228,17 @@ BOLD_WIDTH_FACTOR = 1.05
 
 
 def cap_size_to_longest_word(lines, width_emu, size_pt, min_size_pt=9, metrics=None,
-                             margins_in=None, bold=False):
+                             margins_in=None, bold=False, safety=None):
     """Shrinks size_pt until the LONGEST WORD fits the usable box width on one
     line — height-only fitting happily accepts sizes at which the renderer has
     no choice but to break a word mid-letter («Автоматизаци/я» on a real 51pt
     title, plan 10а). Without metrics an average-width estimate still catches
     the gross cases. Stops at min_size_pt: below that the text itself is the
-    problem (title budgets, plan 10б), not the font."""
+    problem (title budgets, plan 10б), not the font.
+
+    `safety` is the share of the width a word may take (SINGLE_LINE_SAFETY by
+    default — right for SETTING text). A check of whether a word WILL break
+    passes 1.0: see evaluation.deterministic._breaks_a_word."""
     if not width_emu:
         return size_pt
     text = " ".join(lines) if isinstance(lines, (list, tuple)) else str(lines)
@@ -246,7 +250,7 @@ def cap_size_to_longest_word(lines, width_emu, size_pt, min_size_pt=9, metrics=N
         return size_pt
     # The renderer wraps 2-4% earlier than fontTools advances predict (see
     # SINGLE_LINE_SAFETY) — a word that "just fits" by metrics still breaks.
-    budget_pt = budget_in * 72 * SINGLE_LINE_SAFETY
+    budget_pt = budget_in * 72 * (SINGLE_LINE_SAFETY if safety is None else safety)
 
     weight = BOLD_WIDTH_FACTOR if bold else 1.0
 

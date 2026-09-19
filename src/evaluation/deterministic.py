@@ -224,9 +224,16 @@ def _breaks_a_word(shape, metrics_for):
     if not size_pt or metrics is None or not text.strip() or not shape.width:
         return False
     bold = any(r.font.bold for r in _shape_runs(shape) if r.font.bold)
+    # The full width, not the generator's 95%: that margin is for SETTING a
+    # multi-word line, which the renderer wraps a few percent early. A single
+    # word breaks mid-letter only when it does not fit at all. Measured: every
+    # word the 95% budget flagged at 95-100% of the width renders whole — the
+    # pristine VK Education legend «DAU»/«MAU» (99%, 98%) and six KPI figures
+    # on loop decks (+18% at 99.3%, 27% at 99.6%…); every real break sits above
+    # 100% («Необход/имые» 198%, «фактическо-/го» 113%) (iter132).
     capped = cap_size_to_longest_word(
         text, shape.width, size_pt, metrics=metrics,
-        margins_in=horizontal_margins_in(shape), bold=bool(bold))
+        margins_in=horizontal_margins_in(shape), bold=bool(bold), safety=1.0)
     # Against the ROUNDED base: cap_size_to_longest_word starts from
     # round(size_pt), so a 10.5pt box comes back as 10 with nothing shrunk at
     # all. That alone was the single «designer defect» in the whole corpus —
