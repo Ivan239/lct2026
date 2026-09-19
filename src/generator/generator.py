@@ -1619,6 +1619,33 @@ def _keep_figure_on_one_line(box, text, resolver=None):
                 run.font.size = fitted
 
 
+def _unify_figure_sizes(designed):
+    """Figures the designer set at ONE size stay at one size.
+
+    _keep_figure_on_one_line fits each figure to its own box, and a board's
+    boxes differ in width: VK Tech's two-figure board sets «7» and «10» both at
+    166pt in 2.60in and 4.73in boxes, and ours came out «27%» at 82pt beside
+    «9%» at 166pt — the smaller number shouting (iter120-132, six decks).
+    Every figure of a same-size group takes the group's smallest fitted size;
+    figures the designer sized differently keep their hierarchy.
+    `designed`: [(figure_box, size_pt_before_filling)]."""
+    groups = {}
+    for box, size in designed:
+        if size:
+            groups.setdefault(round(size), []).append(box)
+    for boxes in groups.values():
+        if len(boxes) < 2:
+            continue
+        smallest = min(_max_font_pt(b) or 0 for b in boxes)
+        if not smallest:
+            continue
+        for box in boxes:
+            for paragraph in box.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    if run.text.strip():
+                        run.font.size = Pt(smallest)
+
+
 def _fill_stats_kpi(slide, data, claimed_ids, resolver=None):
     title_shape = _stats_title_shape(slide, claimed_ids)
     _set_run_text(title_shape, data.get("title", ""), claimed_ids, resolver=resolver)
@@ -1636,10 +1663,13 @@ def _fill_stats_kpi(slide, data, claimed_ids, resolver=None):
     max_pairs = len(boxes) // 2
 
     if max_pairs >= 1:
+        designed = []
         for (num, label), (figure_box, label_box) in zip(stats[:max_pairs], _stat_pairs(boxes)):
+            designed.append((figure_box, _max_font_pt(figure_box)))
             _set_run_text(figure_box, num, claimed_ids, resolver=resolver)
             _keep_figure_on_one_line(figure_box, num, resolver=resolver)
             _set_run_text(label_box, label, claimed_ids, resolver=resolver)
+        _unify_figure_sizes(designed)
     elif boxes:
         # Real decks often hold this kind of content as one text block next to
         # small bullet/icon graphics, not as separate number+label boxes — with
