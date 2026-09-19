@@ -272,3 +272,23 @@ def test_an_asked_size_is_exact_and_the_cap_follows_it():
     outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"], slides=12)
     assert "РОВНО 12" in client.prompts[0]
     assert len(outline) == 12 and outline[-1]["role"] == "closing"
+
+
+def test_a_surplus_of_stats_is_cut_not_retried():
+    """A one-figure slide (count=1) got three or four pairs back, five retries
+    did the same, and the ValueError took the whole run down — iter113 and
+    twice in iter116. A surplus is repairable: keep the first N."""
+    reply = json.dumps({"title": "Итоги пилота",
+                        "stats": [["94 с", "до пилота"], ["31 с", "после"], ["72%", "каждый день"]]})
+    client = FakeClient([reply])
+    block = generate_block(client, "stats_kpi", "итоги", "бриф", count=1, models=["GigaChat"])
+    assert client.calls == 1
+    assert block["stats"] == [["94 с", "до пилота"]]
+
+
+def test_too_few_items_are_still_retried():
+    few = json.dumps({"title": "Проблемы", "bullets": ["одна"]})
+    enough = json.dumps({"title": "Проблемы", "bullets": ["одна", "две", "три", "четыре"]})
+    client = FakeClient([few, enough])
+    block = generate_block(client, "bullet_list", "проблемы", "бриф", count=3, models=["GigaChat"])
+    assert client.calls == 2 and len(block["bullets"]) == 3

@@ -283,21 +283,35 @@ def _reject_wordy_figures(block, role):
         raise ValueError(f"stat numbers must be bare figures, got {bad!r}")
 
 
+def _take_exactly(items, count, what):
+    """The first `count` items; too FEW is an error (code cannot invent the
+    missing ones, so the caller retries), too MANY is repaired here.
+
+    Rejecting a surplus used to cost whole runs: a one-figure stats slide
+    (count=1) got three or four pairs back, five retries in a row did the same,
+    and the ValueError took the deck down with it — iter113 and twice in
+    iter116. The model ranks what it thinks matters first; the head is the
+    answer."""
+    if not isinstance(items, list) or len(items) < count:
+        got = len(items) if isinstance(items, list) else 0
+        raise ValueError(f"expected {count} {what}, got {got}")
+    return items[:count]
+
+
 def _validate_block(block, role, count):
     if not isinstance(block, dict):
         raise ValueError("block is not a dict")
     if not block.get("title"):
         raise ValueError("empty title")
     if role == "bullet_list":
-        if len(block.get("bullets", [])) != count:
-            raise ValueError(f"expected {count} bullets, got {len(block.get('bullets', []))}")
+        block["bullets"] = _take_exactly(block.get("bullets", []), count, "bullets")
     elif role == "stats_kpi":
         stats = block.get("stats", [])
-        if len(stats) != count or not all(isinstance(s, list) and len(s) == 2 for s in stats):
-            raise ValueError(f"expected {count} [num, label] pairs")
+        pairs = [s for s in stats if isinstance(s, list) and len(s) == 2] if isinstance(stats, list) else []
+        block["stats"] = _take_exactly(pairs, count, "[num, label] pairs")
     elif role == "two_column_comparison":
-        if len(block.get("left_points", [])) != count or len(block.get("right_points", [])) != count:
-            raise ValueError("column point counts don't match")
+        block["left_points"] = _take_exactly(block.get("left_points", []), count, "left points")
+        block["right_points"] = _take_exactly(block.get("right_points", []), count, "right points")
     elif role == "image_caption":
         if not str(block.get("image", "")).strip():
             raise ValueError("image_caption needs an 'image' description")
@@ -308,7 +322,8 @@ def _validate_block(block, role, count):
 # than via validation retries: length overruns are frequent and gradual (a
 # retry often returns another overrun, burning calls), while trimming is
 # lossless enough — a title cut to its first sentence stays a title. Numeric
-# COUNTS keep using retries: a wrong count can't be repaired locally.
+# COUNTS keep using retries when there are too FEW items (they can't be
+# invented locally); a surplus is cut to the first N (_take_exactly).
 MAX_TITLE_WORDS = 9
 MAX_BULLET_CHARS = 72
 

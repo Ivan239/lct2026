@@ -457,17 +457,25 @@ def _plan_two_phase(template_id, brief, model=None, slides=None):
         # Carry the stat numbers/labels already placed: blocks are separate calls
         # and otherwise repeat the same KPIs on two slides (seen on real decks).
         used_nums, used_labels = set(), set()
+        failed = []
         for i, (item, slide_idx, final_count) in enumerate(assignments):
             _set_progress(f"Пишем контент: {item['theme']}", done=i, total=len(assignments))
-            block = generate_block(client, item["role"], item["theme"], brief, count=final_count,
-                                   models=models, style_preamble=style_preamble,
-                                   used_stats=(used_nums, used_labels))
+            try:
+                block = generate_block(client, item["role"], item["theme"], brief, count=final_count,
+                                       models=models, style_preamble=style_preamble,
+                                       used_stats=(used_nums, used_labels))
+            except (ValueError, KeyError):
+                # One block that stays malformed after every retry costs that
+                # slide, not the two-phase deck (the loop lost three runs to one
+                # stats block). It is reported in `skipped` for the user to see.
+                failed.append({"type": item["role"], "title": item.get("theme")})
+                continue
             nums, labels = stat_fingerprints(block)
             used_nums |= nums
             used_labels |= labels
             plan.append((block, slide_idx))
 
-        skipped = [{"type": item["role"], "title": item.get("theme")} for item in skipped_items]
+        skipped = [{"type": item["role"], "title": item.get("theme")} for item in skipped_items] + failed
         return plan, skipped
     except Exception:
         # The legacy fallback keeps the product available, but a silent switch

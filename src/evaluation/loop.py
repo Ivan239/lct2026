@@ -260,11 +260,21 @@ def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_p
     # keep the flat default).
     item_chars = {s["idx"]: s.get("item_chars")
                   for fam in spec["families"] for s in fam["slides"]}
+    failed = []
     for item, slide_idx, final_count in assignments:
-        block = generate_block(client, item["role"], item["theme"], brief,
-                               count=final_count, models=models, style_preamble=style_preamble,
-                               used_stats=(used_nums, used_labels),
-                               item_chars=item_chars.get(slide_idx))
+        try:
+            block = generate_block(client, item["role"], item["theme"], brief,
+                                   count=final_count, models=models, style_preamble=style_preamble,
+                                   used_stats=(used_nums, used_labels),
+                                   item_chars=item_chars.get(slide_idx))
+        except (ValueError, KeyError) as e:
+            # One block the model would not get right after every retry costs
+            # that slide, not the deck: three whole runs were lost to one
+            # stats block before (iter113, iter116). Network errors still
+            # propagate — the loop reports those as «пропущено по сети».
+            failed.append({"type": item["role"], "title": item.get("theme"),
+                           "reason": f"блок не собран: {e}"})
+            continue
         nums, labels = stat_fingerprints(block)
         used_nums |= nums
         used_labels |= labels
@@ -272,7 +282,7 @@ def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_p
     synth_canvas = _synth_canvas_hints(source_pptx, plan, profile)
     generate(source_pptx, plan, out_pptx, synth_canvas=synth_canvas,
              canvas_backgrounds=(profile or {}).get("backgrounds"))
-    skipped = [{"type": it["role"], "title": it.get("theme")} for it in skipped_items]
+    skipped = [{"type": it["role"], "title": it.get("theme")} for it in skipped_items] + failed
     return plan, skipped
 
 
