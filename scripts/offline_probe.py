@@ -86,6 +86,7 @@ OUTLINE = [
 LONG = {
     "title": {"type": "title", "title": "Платформа управленческой отчётности «Поток»",
               "subtitle": "Итоги пилотного внедрения в трёх подразделениях за квартал"},
+    "section_divider": {"type": "section_divider", "title": "Что изменилось за квартал"},
     "bullet_list": {"type": "bullet_list", "title": "Что мешало собирать отчётность вовремя",
                     "bullets": ["Ручной сбор показателей из семи независимых систем",
                                 "Разные форматы выгрузок у каждого подразделения",
@@ -111,6 +112,8 @@ LONG = {
 # because LONG and SHORT differ in the length of their BODY text and keep the
 # titles short. Anything that depends on a title's length was invisible here.
 WORDY = {
+    "section_divider": {"type": "section_divider",
+                        "title": "Что изменилось в подготовке отчётности за квартал"},
     "title": {"type": "title",
               "title": "Единая платформа управленческой отчётности и аналитики для розничной сети",
               "subtitle": "Итоги пилотного внедрения в трёх подразделениях за четвёртый квартал"},
@@ -141,6 +144,7 @@ WORDY = {
 
 SHORT = {
     "title": {"type": "title", "title": "Платформа Поток", "subtitle": "Итоги квартала"},
+    "section_divider": {"type": "section_divider", "title": "Итоги"},
     "bullet_list": {"type": "bullet_list", "title": "Что мешало",
                     "bullets": ["Ручные отчёты", "Разные форматы", "Долгие согласования"]},
     "stats_kpi": {"type": "stats_kpi", "title": "Результаты",
@@ -279,6 +283,9 @@ _ITEM_POOL = [
 ]
 
 
+_FIGURE_POOL = ["-40%", "+18", "4 дня", "×2", "95%", "3 недели", "-25%", "12 часов", "+7%"]
+
+
 def vary_block(block, n):
     """The same block, told about a different part of the story."""
     if n == 0:
@@ -291,14 +298,46 @@ def vary_block(block, n):
     # per-slot character budget trims away, and then the slides carry identical
     # bullets under different headings — a fixture that merely stops tripping
     # the duplicate check instead of actually varying.
-    for field in ("bullets", "left_points", "right_points"):
+    # Each list field starts at its OWN offset: with one formula for all three,
+    # a repeated comparison came out with identical «Было» and «Стало» columns
+    # (seen on the first 12-slide probe deck, iter118).
+    for k, field in enumerate(("bullets", "left_points", "right_points")):
         if field in varied:
-            varied[field] = [_ITEM_POOL[(n * 7 + i) % len(_ITEM_POOL)]
+            varied[field] = [_ITEM_POOL[(n * 7 + k * 3 + i) % len(_ITEM_POOL)]
                              for i in range(len(varied[field]))]
+    # Figures vary too: a repeated KPI slide showing «-40%» again is a
+    # duplicate by construction, not a finding.
     if "stats" in varied:
-        varied["stats"] = [[num, _ITEM_POOL[(n * 5 + i) % len(_ITEM_POOL)]]
-                           for i, (num, _) in enumerate(varied["stats"])]
+        varied["stats"] = [[_FIGURE_POOL[(n * 3 + i) % len(_FIGURE_POOL)],
+                            _ITEM_POOL[(n * 5 + i) % len(_ITEM_POOL)]]
+                           for i in range(len(varied["stats"]))]
     return varied
+
+
+# The deck size the VK Tech brief asks for is 10-15 slides; OUTLINE is six, and
+# the probe's baseline numbers are measured on it, so it stays the default. A
+# deck of the brief's size repeats every content role — the clone path — and
+# carries a section divider, which the six-slide outline never had.
+DECK_SIZE_MIN, DECK_SIZE_MAX = 6, 15
+_CONTENT_CYCLE = [("bullet_list", 3), ("stats_kpi", 3), ("two_column_comparison", 2)]
+
+
+def deck_outline(size):
+    """An outline of exactly `size` slides: cover, divider, content roles in
+    turn, one image slide, the closing last — the shape a real 10-15 slide
+    deck takes. Repeated roles get distinct content from build_plan
+    (vary_block)."""
+    if not DECK_SIZE_MIN <= size <= DECK_SIZE_MAX:
+        raise ValueError(f"deck size {size} outside {DECK_SIZE_MIN}-{DECK_SIZE_MAX}")
+    head = [{"role": "title", "theme": "платформа", "count": None},
+            {"role": "section_divider", "theme": "что изменилось", "count": None}]
+    tail = [{"role": "image_caption", "theme": "платформа в работе", "count": None},
+            {"role": "closing", "theme": "пилот", "count": None}]
+    body = [{"role": role, "theme": f"{role}-{i}", "count": count}
+            for i, (role, count) in (
+                (i, _CONTENT_CYCLE[i % len(_CONTENT_CYCLE)])
+                for i in range(size - len(head) - len(tail)))]
+    return head + body + tail
 
 
 def repeat_outline(outline, times):
@@ -802,11 +841,14 @@ def main():
     ap.add_argument("--items", type=int, default=None,
                     help="how many bullets the brief asks for (default: the outline's 3) "
                          "— changes which template slide the matcher picks")
+    ap.add_argument("--deck-size", type=int, default=None,
+                    help=f"a deck of exactly N slides ({DECK_SIZE_MIN}-{DECK_SIZE_MAX}) — the VK Tech "
+                         "brief's 10-15 instead of the six-slide baseline outline")
     ap.add_argument("--out", default=OUT_ROOT)
     args = ap.parse_args()
 
     blocks = {"long": LONG, "short": SHORT, "wordy": WORDY}[args.content]
-    outline = OUTLINE
+    outline = deck_outline(args.deck_size) if args.deck_size else OUTLINE
     if args.items:
         blocks = {k: dict(v) for k, v in blocks.items()}
         extra = ["Отчёты собирались вручную в конце месяца",
@@ -814,7 +856,7 @@ def main():
         pool = list(blocks["bullet_list"]["bullets"]) + extra
         blocks["bullet_list"]["bullets"] = (pool * 3)[:args.items]
         outline = [dict(item, count=args.items) if item["role"] == "bullet_list" else item
-                   for item in OUTLINE]
+                   for item in outline]
     outline = repeat_outline(outline, args.repeat)
     rows = []
     for name, template_id in REAL_TEMPLATES:
@@ -823,7 +865,8 @@ def main():
         rows.append(probe(name, template_id, blocks, args.out, outline,
                           stamp=(args.content, args.items)))
 
-    print(f"\n# Офлайн-прогон, контент: {args.content}\n")
+    size = f"{args.deck_size} слайдов" if args.deck_size else f"{len(outline)} слайдов (базовая фикстура)"
+    print(f"\n# Офлайн-прогон, контент: {args.content}, дека: {size}\n")
     for r in rows:
         if r.get("skipped"):
             print(f"- {r['template']:10} пропущен: {r['skipped']}")

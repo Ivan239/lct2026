@@ -147,3 +147,30 @@ def test_the_wrap_overflow_count_ignores_the_designers_own_boxes(tmp_path):
 
     counted_ours = probe.boxes_over_at_render_wrap(source, source, [({}, 0)])
     assert counted_ours == 0, "the designer's own text must not be counted as ours"
+
+
+def test_deck_outline_has_the_briefs_shape_at_any_size():
+    """The VK Tech brief sizes a deck at 10-15 slides; the baseline outline is
+    six. deck_outline(n) is exactly n slides: cover and divider first, one
+    image slide, the closing last, content roles in turn between them."""
+    for size in (10, 12, 15):
+        roles = [item["role"] for item in probe.deck_outline(size)]
+        assert len(roles) == size
+        assert roles[:2] == ["title", "section_divider"] and roles[-1] == "closing"
+        assert roles.count("image_caption") == 1 and roles.count("closing") == 1
+        assert {"bullet_list", "stats_kpi", "two_column_comparison"} <= set(roles)
+    with pytest.raises(ValueError):
+        probe.deck_outline(16)
+
+
+def test_a_repeated_block_differs_in_columns_and_figures():
+    """A 12-slide deck repeats every content role; the first one came out with
+    identical «Было»/«Стало» columns and «-40%» on two KPI slides — duplicates
+    of the fixture, not of the product."""
+    comparison = probe.vary_block(probe.LONG["two_column_comparison"], 1)
+    assert comparison["left_points"] != comparison["right_points"]
+    figures = {tuple(n for n, _ in probe.vary_block(probe.LONG["stats_kpi"], k)["stats"])
+               for k in range(3)}
+    assert len(figures) == 3, "repeated KPI slides reuse the same figures"
+    for preset in (probe.LONG, probe.SHORT, probe.WORDY):
+        assert "section_divider" in preset, "a 10-15 slide deck has a divider to fill"
