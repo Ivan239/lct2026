@@ -273,7 +273,26 @@ def keep_text_inside_slide(prs, resolver, slide_indices=None):
     keep_text_clear_of_side_art. Returns the shapes it narrowed."""
     changed = []
     slide_width = int(prs.slide_width)
-    indices = range(len(prs.slides._sldIdLst)) if slide_indices is None else slide_indices
+    indices = list(range(len(prs.slides._sldIdLst))) if slide_indices is None else list(slide_indices)
+    # The mirror margin is the DECK's page margin, not this slide's smallest
+    # left edge. On a slide whose design lives in the right half both boxes
+    # start at 5.72in, the mirror came out at 4.28in — left of the box itself —
+    # and the rule skipped a title that ran 1.32in past the slide edge
+    # (iter150). Measured over the corpus: the deck margin is 0.07-0.68in on
+    # all 13 templates, while a single slide's smallest left reaches 3.67in.
+    # Over the WHOLE presentation, not just the slides that ship: this pass runs
+    # before the unused template slides are pruned, so the minimum here is the
+    # designer's own page margin rather than a margin of whatever we happened to
+    # fill (a two-slide deck of right-half layouts has no left margin at all).
+    deck_lefts = [int(s.left)
+                  for idx in range(len(prs.slides._sldIdLst))
+                  for s in prs.slides[idx].shapes
+                  if s.has_text_frame and s.text_frame.text.strip()
+                  and s.left is not None and int(s.left) > 0]
+    if not deck_lefts:
+        return changed
+    margin = min(deck_lefts)
+    right_bound = slide_width - margin
     for slide_idx in indices:
         slide = prs.slides[slide_idx]
         texts_shapes = [s for s in slide.shapes if s.has_text_frame and s.text_frame.text.strip()
@@ -281,7 +300,6 @@ def keep_text_inside_slide(prs, resolver, slide_indices=None):
         lefts = [int(s.left) for s in texts_shapes if int(s.left) > 0]
         if not lefts:
             continue
-        right_bound = slide_width - min(lefts)
         for shape in texts_shapes:
             if int(shape.left + shape.width) <= slide_width:
                 continue
@@ -295,7 +313,7 @@ def keep_text_inside_slide(prs, resolver, slide_indices=None):
                 # text moves. «Среднее время поиска: 31 секунда» ran off the
                 # right edge of the funnel slide otherwise (iter141/143).
                 shift = int(shape.left + shape.width) - right_bound
-                if int(shape.left) - shift < min(lefts):
+                if int(shape.left) - shift < margin:
                     continue
                 shape.left = Emu(int(shape.left) - shift)
                 changed.append((slide_idx, shape.shape_id))
