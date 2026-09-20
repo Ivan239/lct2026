@@ -1678,8 +1678,38 @@ def _keep_figure_on_one_line(box, text, resolver=None):
                 run.font.size = fitted
 
 
-def _keep_figure_clear_of_its_label(figure_box, label_box, resolver=None):
-    """A figure box ends where its own label begins.
+# A rule the designer draws under a display figure is a hairline: VK Tech's
+# board rules are 0.03in tall. Measured over the VK templates: the only
+# figure/label pairs with a rule INSIDE the figure box are that board (and the
+# Gantt chart, which build_spec no longer offers at all).
+_FIGURE_RULE_MAX_THICKNESS_EMU = int(Inches(0.06))
+
+
+def _figure_floor(figure_box, label_box, slide):
+    """The lowest the figure's text may reach: its label, or a decorative rule
+    the designer drew under the figure — whichever comes first."""
+    floor = None
+    if (label_box is not None and label_box.top is not None
+            and figure_box.top is not None and int(label_box.top) > int(figure_box.top)):
+        floor = int(label_box.top)
+    if slide is not None:
+        for shape in slide.shapes:
+            if shape.has_text_frame and shape.text_frame.text.strip():
+                continue
+            if not shape.height or int(shape.height) > _FIGURE_RULE_MAX_THICKNESS_EMU:
+                continue
+            if shape.top is None or shape.left is None or not shape.width:
+                continue
+            inside = int(figure_box.top) < int(shape.top) < int(figure_box.top + figure_box.height)
+            overlaps = (int(shape.left) < int(figure_box.left + figure_box.width)
+                        and int(shape.left + shape.width) > int(figure_box.left))
+            if inside and overlaps:
+                floor = int(shape.top) if floor is None else min(floor, int(shape.top))
+    return floor
+
+
+def _keep_figure_clear_of_its_label(figure_box, label_box, resolver=None, slide=None):
+    """A figure box ends where its own label — or the rule under it — begins.
 
     Designers overlap the two: VK Tech's figure box runs to 4.21in while the
     label starts at 4.03in, and «7» at 166pt still clears it because a line
@@ -1690,11 +1720,12 @@ def _keep_figure_clear_of_its_label(figure_box, label_box, resolver=None):
     Trimming the box lifts the text with it; a box already shorter than its own
     line is left alone, since shrinking it further only invites the renderer's
     autofit."""
-    if not all((figure_box, label_box)) or figure_box.top is None or label_box.top is None:
+    if figure_box is None or figure_box.top is None:
         return
-    if label_box.top <= figure_box.top:  # label beside or above: no stack to fix
+    floor = _figure_floor(figure_box, label_box, slide)
+    if floor is None:  # label beside or above and no rule: no stack to fix
         return
-    room = label_box.top - figure_box.top
+    room = floor - int(figure_box.top)
     if room >= figure_box.height:
         return
     paragraph = figure_box.text_frame.paragraphs[0]
@@ -1764,7 +1795,7 @@ def _fill_stats_kpi(slide, data, claimed_ids, resolver=None):
         # After the size is final: a fitted figure is smaller than the one the
         # box was built for, and bottom-anchored text sinks into the label.
         for figure_box, label_box in pairs:
-            _keep_figure_clear_of_its_label(figure_box, label_box, resolver=resolver)
+            _keep_figure_clear_of_its_label(figure_box, label_box, resolver=resolver, slide=slide)
     elif boxes:
         # Real decks often hold this kind of content as one text block next to
         # small bullet/icon graphics, not as separate number+label boxes — with
