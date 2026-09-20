@@ -175,7 +175,49 @@ def generate_outline(client, brief, spec, models=TEXT_MODELS, style_preamble="",
                 outline = longer
         except Exception:  # noqa: BLE001 — the first outline stands
             pass
+    if len(outline) < low:
+        outline = _ask_for_missing_blocks(client, outline, brief, menu, low, high, models)
     return outline
+
+
+MORE_BLOCKS_PROMPT = "outline_more.v1.txt"
+
+
+def _ask_for_missing_blocks(client, outline, brief, menu, low, high, models):
+    """Ask for the MISSING blocks only, and append them.
+
+    Asking the whole outline again gets the same length back: three decks in a
+    row came out 9 of 12, 9 of 10 and 10 of 12 after the corrective call
+    (iter145-148), because the model answers a re-ask the way it answered the
+    ask. A short, specific request — «нужно ещё 3, вот уже написанные темы» —
+    is a different question. Never a failure: whatever comes back is added to
+    what we have, and a deck one slide short still ships."""
+    missing = low - len(outline)
+    written = "\n".join(f"- {item['role']} — {item.get('theme', '')}" for item in outline)
+    prompt = (load_prompt(MORE_BLOCKS_PROMPT)
+              .replace("__HAVE__", str(len(outline)))
+              .replace("__NEED__", str(low))
+              .replace("__MISSING__", str(missing))
+              .replace("__WRITTEN__", written)
+              .replace("__BRIEF__", brief)
+              .replace("__MENU__", menu))
+
+    def call(model):
+        result = client.chat([{"role": "user", "content": prompt}], model=model, max_tokens=800)
+        return _validate_outline(extract_json(result["choices"][0]["message"]["content"]))
+
+    try:
+        extra = call_with_model_fallback(call, models)
+    except Exception:  # noqa: BLE001 — best effort, the short outline stands
+        return outline
+    seen = {str(item.get("theme", "")).strip().lower() for item in outline}
+    fresh = [item for item in extra
+             if str(item.get("theme", "")).strip().lower() not in seen][:missing]
+    if not fresh:
+        return outline
+    # The closing stays last: _enforce_outline_rules moves it there anyway, and
+    # new blocks belong before the wrap-up.
+    return _enforce_outline_rules(outline + fresh, max_blocks=high)
 
 
 # A KPI figure is a number plus at most a short unit: "+25%", "-30 часов",
