@@ -1,6 +1,7 @@
 import json
 
 from common.json_utils import extract_json
+from common.phrases import unfilled_placeholders
 from common.model_fallback import TEXT_MODELS, call_with_model_fallback
 from common.prompt_files import load_prompt
 
@@ -15,6 +16,22 @@ MAX_SECTION_DIVIDERS = 1
 # to violate. Mirrors content_parser.two_phase._validate_block's stricter
 # per-item check, which this legacy path historically lacked.
 PAIR_FIELD_BY_TYPE = {"stats_kpi": "stats"}
+
+
+def _reject_unfilled_placeholders(block):
+    """Same guard as two_phase._reject_unfilled_placeholders — the two content
+    paths validate independently (CLAUDE.md), and «в X млн рублей» is exactly
+    the kind of thing one path would keep letting through."""
+    texts = [v for v in block.values() if isinstance(v, str)]
+    for value in block.values():
+        if isinstance(value, list):
+            texts += [v for v in value if isinstance(v, str)]
+            for item in value:
+                if isinstance(item, (list, tuple)):
+                    texts += [v for v in item if isinstance(v, str)]
+    found = unfilled_placeholders(*texts)
+    if found:
+        raise ValueError(f"unfilled placeholders in the block: {found!r}")
 
 
 def _sanitize_pairs(block):
@@ -45,7 +62,13 @@ def parse_brief(client, brief_text, models=TEXT_MODELS):
 
     def call(model):
         result = client.chat([{"role": "user", "content": prompt}], model=model, max_tokens=2000)
-        return extract_json(result["choices"][0]["message"]["content"])
+        blocks = extract_json(result["choices"][0]["message"]["content"])
+        # Inside the call, so a model that left «в X млн рублей» is simply asked
+        # again (the fallback retries); the deck is never lost over it.
+        for block in blocks if isinstance(blocks, list) else []:
+            if isinstance(block, dict):
+                _reject_unfilled_placeholders(block)
+        return blocks
 
     blocks = call_with_model_fallback(call, models)
     blocks = _cap_section_dividers(blocks)
@@ -110,7 +133,12 @@ def resize_block(client, block, target_count, models=TEXT_MODELS):
 
     def call(model):
         result = client.chat([{"role": "user", "content": prompt}], model=model, max_tokens=1000)
-        return extract_json(result["choices"][0]["message"]["content"])
+        resized = extract_json(result["choices"][0]["message"]["content"])
+        # Inside the call: the retry costs one request, raising out here would
+        # cost the slide (and this whole function already degrades to `block`).
+        if isinstance(resized, dict):
+            _reject_unfilled_placeholders(resized)
+        return resized
 
     try:
         resized = call_with_model_fallback(call, models)

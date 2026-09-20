@@ -17,7 +17,8 @@ import re
 
 from common.json_utils import extract_json
 from common.phrases import (DANGLING_TAIL_WORDS, cut_at_clause, cut_at_clause_chars,
-                            drop_dangling_function_words)
+                            drop_dangling_function_words,
+                            unfilled_placeholders)
 from common.model_fallback import TEXT_MODELS, call_with_model_fallback
 from common.prompt_files import load_prompt
 from common.synthesis import SYNTHESIZABLE_TYPES
@@ -203,6 +204,26 @@ def _reject_wordy_figures(block, role):
     bad = [num for num, _ in block.get("stats", []) if not _is_display_figure(num)]
     if bad:
         raise ValueError(f"stat numbers must be bare figures, got {bad!r}")
+
+
+def _reject_unfilled_placeholders(block):
+    """Raise (-> retry) when the model left a variable for the presenter to
+    fill: «обходится компании в X млн рублей» shipped on a real deck (iter147),
+    and a deck that asks the reader to imagine the number says nothing. One
+    hit in 1715 texts of 48 decks, so the retry is rare and cheap."""
+    found = unfilled_placeholders(*_block_texts(block))
+    if found:
+        raise ValueError(f"unfilled placeholders in the block: {found!r}")
+
+
+def _block_texts(block):
+    texts = [block.get("title", ""), block.get("subtitle", ""), block.get("image", ""),
+             block.get("caption", ""), block.get("left_heading", ""), block.get("right_heading", "")]
+    for key in ("bullets", "left_points", "right_points"):
+        texts += list(block.get(key, []) or [])
+    for pair in block.get("stats", []) or []:
+        texts += list(pair) if isinstance(pair, (list, tuple)) else [pair]
+    return [t for t in texts if isinstance(t, str)]
 
 
 def _take_exactly(items, count, what):
@@ -496,6 +517,7 @@ def generate_block(client, role, theme, brief, count=None, models=TEXT_MODELS,
             result = client.chat([{"role": "user", "content": prompt}], model=model, max_tokens=800)
             block = _validate_block(extract_json(result["choices"][0]["message"]["content"]),
                                     role, count or 3)
+            _reject_unfilled_placeholders(block)
             if enforce_unique:
                 _reject_wordy_figures(block, role)
                 _reject_duplicate_stats(block, role, used_nums, used_labels)

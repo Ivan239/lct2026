@@ -7,6 +7,7 @@ cannot import each other (generator -> two_phase -> template_spec.builder ->
 generator is a cycle).
 """
 
+import re
 # A phrase must not END on a preposition or conjunction. Cutting at a word
 # boundary is not enough: the T-Zh study slot budget is 28 characters, and real
 # bullets came out as «Ручной сбор показателей из», «Разные форматы выгрузок у»,
@@ -89,3 +90,31 @@ def cut_at_clause(text, max_words):
             if cut:
                 return drop_dangling_function_words(cut) or cut
     return text
+
+
+# A variable the model left for the presenter to fill: «обходится компании в X
+# млн рублей», «[название команды]», «____». Measured over the corpus: one hit
+# in 1715 texts of our 48 decks — that very sentence — and one in 1824 texts of
+# the 13 templates, the designer's own «x% данные показателя», which never goes
+# through this path. A bare letter only counts right before a unit, so «Топ X
+# продуктов» stays out of it and «в X млн» does not.
+PLACEHOLDER_VARIABLE = re.compile(
+    r"(?<![\w-])[XxNnХх](?![\w-])\s*(?=млн|млрд|тыс|%|руб|₽|раз|дн|недел|месяц|лет|год|чел|шт|мин|час)"
+    r"|\[[^\]\n]{1,30}\]|\{[^}\n]{1,30}\}|_{3,}|<[^>\n]{1,30}>",
+    re.IGNORECASE)
+
+
+def unfilled_placeholders(*texts):
+    """The placeholder variables left in these texts, if any.
+
+    Both content paths must ask: two_phase and the legacy parser validate
+    independently (CLAUDE.md), and a deck that says «в X млн рублей» is worse
+    than a deck one retry slower."""
+    found = []
+    for text in texts:
+        for item in (text if isinstance(text, (list, tuple)) else [text]):
+            if isinstance(item, (list, tuple)):
+                found += unfilled_placeholders(*item)
+            elif isinstance(item, str):
+                found += [m.group(0).strip() for m in PLACEHOLDER_VARIABLE.finditer(item)]
+    return found
