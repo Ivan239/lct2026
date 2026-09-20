@@ -2081,6 +2081,57 @@ def _is_picture_group(shape):
     return bool(leaves) and all(leaf.shape_type == MSO_SHAPE_TYPE.PICTURE for leaf in leaves)
 
 
+# A picture PLACEHOLDER still holding the designer's sample: the document
+# itself says «a picture goes here», and what is in it is the template's demo.
+# Measured over the VK templates: exactly two such placeholders — VK Education
+# 30, the phone mockup of someone else's feed that shipped beside our bullets
+# fourteen decks running, and its closing's 1.18in logo, which the area floor
+# spares.
+DEMO_PLACEHOLDER_MIN_AREA_FRACTION = 0.03
+
+
+def _demo_picture_placeholders(slide):
+    """Picture placeholders that still carry the template's own image."""
+    area = (_slide_width(slide) or 0) * (_slide_height(slide) or 0)
+    if not area:
+        return []
+    found = []
+    for shape in slide.shapes:
+        if not shape.is_placeholder or not shape.width or not shape.height:
+            continue
+        try:
+            kind = shape.placeholder_format.type
+        except (AttributeError, ValueError):
+            continue
+        if kind not in (PP_PLACEHOLDER.PICTURE, PP_PLACEHOLDER.OBJECT):
+            continue
+        if shape._element.find(".//" + qn("a:blip")) is None:
+            continue
+        if shape.width * shape.height / area < DEMO_PLACEHOLDER_MIN_AREA_FRACTION:
+            continue  # a logo or a QR code in a slot, not a demo image
+        found.append(shape)
+    return found
+
+
+def _replace_demo_placeholders(slide, style_run, claimed_ids):
+    """Swap a demo image in a picture placeholder for the honest skeleton.
+
+    image_caption slots have been handled since iter107; this is the same
+    picture, in the same kind of slot, on a slide of any other role — VK
+    Education's phone mockup stood next to our bullets about CRM migration and
+    smart search alike (iter142-148, fourteen sightings)."""
+    frames = []
+    for placeholder in _demo_picture_placeholders(slide):
+        left, top = int(placeholder.left), int(placeholder.top)
+        width, height = int(placeholder.width), int(placeholder.height)
+        placeholder._element.getparent().remove(placeholder._element)
+        frame = _draw_image_skeleton(slide, left, top, width, height, None, style_run)
+        if frame is not None:
+            claimed_ids.add(frame.shape_id)
+            frames.append(frame)
+    return frames
+
+
 def _image_slot_pictures(slide):
     """The pictures that make up the image slot of an image_caption slide.
 
@@ -2157,8 +2208,23 @@ def _replace_image_slot(slide, caption, style_run, margin_emu=0, title_shape=Non
         return None
     for picture in pictures:
         picture._element.getparent().remove(picture._element)
+    return _draw_image_skeleton(slide, left, top, right - left, bottom - top, caption, style_run)
+
+
+def _draw_image_skeleton(slide, left, top, width, height, caption, style_run):
+    """The dashed «ИЗОБРАЖЕНИЕ» frame, drawn over a given box.
+
+    Shared by the image_caption slot (iter107) and by demo pictures sitting in
+    a picture placeholder on any other slide (iter150)."""
+    import copy
+
+    from pptx.enum.shapes import MSO_SHAPE
+    from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+
+    if width < int(Inches(1)) or height < int(Inches(1)):
+        return None
     frame = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE,
-                                   Emu(left), Emu(top), Emu(right - left), Emu(bottom - top))
+                                   Emu(left), Emu(top), Emu(width), Emu(height))
     frame.name = IMAGE_PLACEHOLDER_NAME
     frame.shadow.inherit = False
     frame.fill.background()
@@ -2674,6 +2740,11 @@ def generate(template_path, plan, out_path, synth_canvas=None, canvas_background
         slide = prs.slides[slide_idx]
         claimed_ids = set()
         FILLERS[block["type"]](slide, block, claimed_ids, resolver=resolver)
+        if block["type"] != "image_caption":  # that filler handles its own slot
+            title = _pick_title_shape(slide, set())
+            style = next((r for p in title.text_frame.paragraphs for r in p.runs), None) \
+                if title is not None and title.has_text_frame else None
+            _replace_demo_placeholders(slide, style, claimed_ids)
         _clear_unclaimed_text(slide, claimed_ids, prs.slide_height)
         _remove_orphan_marker_columns(slide)
         _remove_oversized_pictures(slide, prs.slide_width, prs.slide_height)
