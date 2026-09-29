@@ -66,4 +66,15 @@ export interface GenerateResponse {
   package?: PackageSummary
   fixed_slides?: number[]
   not_fixed?: { slide: number; reason: string }[]
+  variant?: string
+  variant_title?: string
+}
+
+/** Один вариант из «трёх вариантов вёрстки»: либо колода, либо ошибка. */
+export type VariantResult = GenerateResponse & { error?: string }
+
+export interface VariantsResponse {
+  variants: VariantResult[]
+  seconds: number
+  package?: PackageSummary
 }

@@ -4,6 +4,7 @@ import os
 import shutil
 import sys
 import tempfile
+import threading
 import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -26,6 +27,7 @@ from common.synthesis import SYNTHESIZE
 from content_package import ContentPackageError, extract_numbers, load_package, to_brief_text
 from content_parser.parser import RESIZE_FIELD_BY_TYPE, parse_brief, resize_block
 from content_parser.two_phase import generate_block, generate_outline, stat_fingerprints
+from content_parser.variants import VARIANTS, variant_slides
 from design_system.extractor import build_archetype_map
 from design_system.fingerprint_cache import FingerprintCache
 from design_system.extractor import _describe_slide
@@ -292,6 +294,8 @@ class GenerateRequest(BaseModel):
     model: str | None = None
     # Deck size the user asks for; None means the brief's 10-15 slides.
     slides: int | None = None
+    # Вариант вёрстки (content_parser/variants.py); None — вариант по умолчанию.
+    variant: str | None = None
 
 
 @app.get("/api/models")
@@ -481,7 +485,7 @@ def _synth_canvas_hints(template_id, plan):
         return {}
 
 
-def _plan_two_phase(template_id, brief, model=None, slides=None):
+def _plan_two_phase(template_id, brief, model=None, slides=None, variant=None):
     """Slot-first flow (docs/IMPROVEMENT_PLAN.md item 4): outline against the
     template's actual offering, pick concrete slides, then generate each block's
     text sized to the chosen slide's real capacity. Returns (plan, skipped), or
@@ -494,7 +498,8 @@ def _plan_two_phase(template_id, brief, model=None, slides=None):
         style_preamble = card_prompt_preamble(load_card(PARSED_DIR, template_id))
         _set_progress("Планируем структуру презентации")
         outline = generate_outline(client, brief, spec, models=models, style_preamble=style_preamble,
-                                   slides=slides)
+                                   slides=variant_slides(variant, slides) if variant else slides,
+                                   variant=variant)
         assignments, skipped_items = plan_from_outline(outline, spec)
 
         plan = []
@@ -568,12 +573,49 @@ def get_progress():
 @app.post("/api/generate")
 def generate_presentation(req: GenerateRequest):
     _require_model()
-    return _generate_deck(req.template_id, req.brief, req.model, slides=req.slides)
+    if req.variant is not None and req.variant not in VARIANTS:
+        raise HTTPException(status_code=422, detail=f"Неизвестный вариант: {req.variant}")
+    return _generate_deck(req.template_id, req.brief, req.model, slides=req.slides,
+                          variant=req.variant)
+
+
+def _three_variants(template_id, brief, model, source_numbers=None, slides=None):
+    """Три варианта вёрстки одной колоды — ПАРАЛЛЕЛЬНО (организаторы: «пока одна
+    презентация генерируется, можно запускать параллельную генерацию двух других…
+    все 3 презентации генерировались за 5 минут»). Модель зовётся из трёх потоков,
+    рендер LibreOffice — по очереди (_RENDER_LOCK). Сбой одного варианта не
+    отменяет остальные."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+
+    started = time.monotonic()
+    names = list(VARIANTS)
+
+    def one(name):
+        try:
+            return _generate_deck(template_id, brief, model, source_numbers=source_numbers,
+                                  slides=slides, variant=name)
+        except HTTPException as e:
+            return {"variant": name, "variant_title": VARIANTS[name]["title"], "error": e.detail}
+
+    with ThreadPoolExecutor(max_workers=len(names)) as pool:
+        results = list(pool.map(one, names))
+    if all("error" in r for r in results):
+        raise HTTPException(status_code=500, detail=results[0]["error"])
+    return {"variants": results, "seconds": round(time.monotonic() - started, 1)}
+
+
+@app.post("/api/generate/variants")
+def generate_three_variants(req: GenerateRequest):
+    _require_model()
+    if req.template_id not in _template_registry:
+        raise HTTPException(status_code=404, detail="Шаблон не найден")
+    return _three_variants(req.template_id, req.brief, req.model, slides=req.slides)
 
 
 @app.post("/api/generate/package")
 def generate_from_package(template_id: str = Form(...), file: UploadFile = File(...),
-                          model: str | None = Form(None)):
+                          model: str | None = Form(None), all_variants: bool = Form(False)):
     """Generation from a content package (docs/CONTENT_PACKAGE.md): a .zip of
     brief.md + optional package.json, facts.md, data/*.csv, images/*.
 
@@ -594,8 +636,14 @@ def generate_from_package(template_id: str = Form(...), file: UploadFile = File(
             package = load_package(archive, extract_to=workdir)
         except ContentPackageError as e:
             raise HTTPException(status_code=422, detail=f"Контент-пакет: {e}")
-        result = _generate_deck(template_id, to_brief_text(package), model,
-                                source_numbers=package["numbers"], slides=package["slides"])
+        # `is True`: при прямом вызове функции (тесты) значение по умолчанию —
+        # объект Form(False), а он истинен.
+        if all_variants is True:
+            result = _three_variants(template_id, to_brief_text(package), model,
+                                     source_numbers=package["numbers"], slides=package["slides"])
+        else:
+            result = _generate_deck(template_id, to_brief_text(package), model,
+                                    source_numbers=package["numbers"], slides=package["slides"])
     finally:
         shutil.rmtree(workdir, ignore_errors=True)
     result["package"] = {
@@ -621,7 +669,7 @@ def _numbers_warnings(pptx_path, source_numbers):
             for number, tokens in sorted(by_slide.items())]
 
 
-def _generate_deck(template_id, brief, model=None, source_numbers=None, slides=None):
+def _generate_deck(template_id, brief, model=None, source_numbers=None, slides=None, variant=None):
     """Plan → .pptx → previews → warnings. `source_numbers` — the content
     package's numbers; None means the brief is the whole source."""
     if template_id not in _template_registry:
@@ -631,7 +679,8 @@ def _generate_deck(template_id, brief, model=None, source_numbers=None, slides=N
     template_path = os.path.join(TEMPLATES_DIR, f"{template_id}.pptx")
 
     try:
-        plan, skipped = _plan_two_phase(template_id, brief, model=model, slides=slides)
+        plan, skipped = _plan_two_phase(template_id, brief, model=model, slides=slides,
+                                        variant=variant)
         if plan is None:
             _set_progress("Разбираем бриф (запасной сценарий)")
             plan, skipped = _plan_legacy(brief, archetype_map, template_path, model=model)
@@ -639,11 +688,18 @@ def _generate_deck(template_id, brief, model=None, source_numbers=None, slides=N
         if not plan:
             raise HTTPException(status_code=422, detail="Ни один блок контента не подошёл ни к одному слайду шаблона")
 
-        return _assemble_deck(template_id, plan, skipped, brief, model, source_numbers)
+        result = _assemble_deck(template_id, plan, skipped, brief, model, source_numbers)
+        if variant:
+            result["variant"] = variant
+            result["variant_title"] = VARIANTS[variant]["title"]
+        return result
     finally:
         # Whatever path we exit through — success, quota error, fallback crash —
         # the progress slot must not stay stuck on a stale "active" stage.
         _set_progress("", active=False)
+
+
+_RENDER_LOCK = threading.Lock()
 
 
 def _session_path(generation_id):
@@ -665,7 +721,10 @@ def _assemble_deck(template_id, plan, skipped, brief, model, source_numbers):
                  synth_canvas=_synth_canvas_hints(template_id, plan),
                  canvas_backgrounds=_measured_backgrounds(template_id))
         _set_progress("Рендерим превью слайдов")
-        slide_png_paths = render_pptx_to_pngs(out_pptx, GENERATED_DIR)
+        # Два LibreOffice одновременно падают (exit 255): варианты генерируются
+        # параллельно, а рендерятся по очереди.
+        with _RENDER_LOCK:
+            slide_png_paths = render_pptx_to_pngs(out_pptx, GENERATED_DIR)
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Не удалось собрать презентацию: {e}")
 
@@ -675,7 +734,8 @@ def _assemble_deck(template_id, plan, skipped, brief, model, source_numbers):
     # LibreOffice повторно не запускается. Сбой экспорта не отменяет .pptx.
     exports = {}
     try:
-        exported = export_all(out_pptx, GENERATED_DIR, png_paths=slide_png_paths)
+        with _RENDER_LOCK:
+            exported = export_all(out_pptx, GENERATED_DIR, png_paths=slide_png_paths)
         exports = {"pdf_url": f"/static/generated/{generation_id}.pdf",
                    "html_url": f"/static/generated/{generation_id}.html",
                    "substituted_fonts": exported["substituted_fonts"],

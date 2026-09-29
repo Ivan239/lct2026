@@ -1,4 +1,4 @@
-import type { BalanceEntry, GenerateResponse, TemplateSummary } from './types'
+import type { BalanceEntry, GenerateResponse, TemplateSummary, VariantsResponse } from './types'
 
 // В сборке (docker compose) фронт и API за одним nginx: путь относительный.
 // В dev-режиме Vite бэкенд поднят отдельно на 8000.
@@ -87,4 +87,31 @@ export function fixSelected(generationId: string, slides: number[]): Promise<Gen
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ slides }),
   })
+}
+
+/** Три варианта вёрстки (компактный, визуальный, подробный) одной кнопкой —
+ * сервер генерирует их параллельно. */
+export function generateVariants(
+  templateId: string,
+  brief: string,
+  model?: string | null,
+): Promise<VariantsResponse> {
+  return request('/api/generate/variants', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ template_id: templateId, brief, model: model || null }),
+  })
+}
+
+export function generateVariantsFromPackage(
+  templateId: string,
+  file: File,
+  model?: string | null,
+): Promise<VariantsResponse> {
+  const form = new FormData()
+  form.append('template_id', templateId)
+  form.append('file', file)
+  form.append('all_variants', 'true')
+  if (model) form.append('model', model)
+  return request('/api/generate/package', { method: 'POST', body: form })
 }

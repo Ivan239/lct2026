@@ -51,9 +51,10 @@ def stubbed(monkeypatch, tmp_path):
     seen = {}
     fact = next(f for f in load_package(PACKAGE)["facts"] if any(c.isdigit() for c in f))
 
-    def plan(template_id, brief, model=None, slides=None):
+    def plan(template_id, brief, model=None, slides=None, variant=None):
         seen["brief"] = brief
         seen["slides"] = slides
+        seen.setdefault("variants", []).append(variant)
         return [({"type": "title", "title": "Умный поиск", "subtitle": "Питч фичи"}, SYNTHESIZE),
                 ({"type": "bullet_list", "title": "Что даёт поиск",
                   "bullets": [fact, "Выручка выросла на 777%"]}, SYNTHESIZE)], []
@@ -118,3 +119,20 @@ def test_the_plain_brief_endpoint_audits_numbers_against_the_brief(stubbed):
         api_main.GenerateRequest(template_id=_template_id(), brief=brief))
     flagged = [w for w in result["warnings"] if w["kind"] == "numbers_not_in_source"]
     assert len(flagged) == 1 and flagged[0]["details"].endswith(": 777%"), result["warnings"]
+
+
+def test_three_variants_come_back_together_one_per_layout(stubbed):
+    """Организаторы: «все 3 презентации генерировались за 5 минут», параллельно.
+    Один запрос — три колоды, у каждой свой вариант плана."""
+    result = api_main.generate_three_variants(
+        api_main.GenerateRequest(template_id=_template_id(), brief="Питч умного поиска"))
+    assert [v["variant"] for v in result["variants"]] == list(api_main.VARIANTS)
+    assert sorted(stubbed["variants"]) == sorted(api_main.VARIANTS)
+    assert len({v["generation_id"] for v in result["variants"]}) == 3
+    assert all(v["variant_title"] for v in result["variants"]) and result["seconds"] >= 0
+
+
+def test_a_package_can_ask_for_all_three(stubbed):
+    result = api_main.generate_from_package(template_id=_template_id(), file=_zip(PACKAGE),
+                                            model=None, all_variants=True)
+    assert len(result["variants"]) == 3 and result["package"]["facts"] > 0

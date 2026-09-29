@@ -62,3 +62,12 @@
 .briefDisabled {
   opacity: 0.45;
 }
+
+.variantsToggle {
+  display: flex;
+  align-items: center;
+  gap: v.$space-2;
+  font-size: 14px;
+  color: v.$color-navy;
+  cursor: pointer;
+}

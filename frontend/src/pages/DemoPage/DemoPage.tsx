@@ -11,13 +11,16 @@ import {
   fetchTemplates,
   generateFromPackage,
   generatePresentation,
+  generateVariants,
+  generateVariantsFromPackage,
   uploadTemplate,
 } from '@/shared/api/client'
-import type { BalanceEntry, GenerateResponse, TemplateSummary } from '@/shared/api/types'
+import type { BalanceEntry, GenerateResponse, TemplateSummary, VariantsResponse } from '@/shared/api/types'
 import { TemplatePicker } from './components/TemplatePicker'
 import { BriefEditor } from './components/BriefEditor'
 import { PackageInput } from './components/PackageInput'
 import { GenerationResult } from './components/GenerationResult'
+import { VariantsResult } from './components/VariantsResult'
 import { EXAMPLE_BRIEF } from './exampleBrief'
 import styles from './DemoPage.module.scss'
 
@@ -56,6 +59,8 @@ export function DemoPage() {
   const [uploading, setUploading] = useState(false)
   const [generating, setGenerating] = useState(false)
   const [result, setResult] = useState<GenerateResponse | null>(null)
+  const [variants, setVariants] = useState<VariantsResponse | null>(null)
+  const [threeVariants, setThreeVariants] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [balance, setBalance] = useState<BalanceEntry[] | null>(null)
   const [progressLabel, setProgressLabel] = useState('Собираем презентацию...')
@@ -108,13 +113,24 @@ export function DemoPage() {
     setGenerating(true)
     setError(null)
     setResult(null)
-    const poll = startProgressPolling(setProgressLabel, 'Собираем презентацию...')
+    setVariants(null)
+    const poll = startProgressPolling(
+      setProgressLabel,
+      threeVariants ? 'Собираем три варианта...' : 'Собираем презентацию...',
+    )
     try {
-      const response = packageFile
-        ? await generateFromPackage(selectedId, packageFile, generateModel)
-        : await generatePresentation(selectedId, brief, generateModel)
-      setResult(response)
-      if (response.balance) setBalance(response.balance)
+      if (threeVariants) {
+        const response = packageFile
+          ? await generateVariantsFromPackage(selectedId, packageFile, generateModel)
+          : await generateVariants(selectedId, brief, generateModel)
+        setVariants(response)
+      } else {
+        const response = packageFile
+          ? await generateFromPackage(selectedId, packageFile, generateModel)
+          : await generatePresentation(selectedId, brief, generateModel)
+        setResult(response)
+        if (response.balance) setBalance(response.balance)
+      }
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -157,12 +173,23 @@ export function DemoPage() {
 
         <div className={styles.generateRow}>
           <ModelSelector label="Модель для генерации:" value={generateModel} onChange={setGenerateModel} />
+          <label className={styles.variantsToggle}>
+            <input
+              type="checkbox"
+              checked={threeVariants}
+              onChange={(e) => setThreeVariants(e.target.checked)}
+              disabled={generating}
+            />
+            Три варианта вёрстки (компактный, визуальный, подробный)
+          </label>
           <Button onClick={handleGenerate} disabled={!selectedId || generating}>
             {generating ? <Spinner label={progressLabel} /> : 'Сгенерировать презентацию'}
           </Button>
         </div>
 
         {error && <div className={styles.error}>{error}</div>}
+
+        {variants && <VariantsResult response={variants} onBalance={setBalance} />}
 
         {result && (
           <GenerationResult
