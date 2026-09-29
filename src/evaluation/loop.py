@@ -294,10 +294,10 @@ def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_p
 def run_iteration(client, model, source_pptx, brief, source_name=None, out_root=LOOP_ROOT,
                   source_numbers=None, slides=None):
     """Full turn for one model. `client` parses the template and generates the
-    deck. Scoring is deterministic-only here (no LLM judge call, ever — Claude
-    reviews the renders and calls evaluation.claude_review.apply_claude_scores
+    deck. Scoring is deterministic-only here (no LLM judge call, ever — the reviewer
+    reviews the renders and calls evaluation.manual_review.apply_review_scores
     separately). Renders straight into the deck's own "look_*" folder so the
-    same PNGs serve both the eval JSON and Claude's visual review — no second
+    same PNGs serve both the eval JSON and the reviewer's visual review — no second
     render. Returns a bundle: template info, deck path, the rubric evaluation,
     and what was skipped. Raises only on a hard failure that leaves no deck to
     score (the caller records that and moves on).

@@ -1,12 +1,12 @@
 """Orchestrator: render a deck, run every DETERMINISTIC rubric check (zero
-tokens), and leave the LLM-mode criteria for Claude to fill in by eye.
+tokens), and leave the LLM-mode criteria for the reviewer to fill in by eye.
 
 No LLM API is called here to judge anything. GigaChat vision was tried and
 measured: it scored a deck with duplicate stat slides and half-empty layouts
 90+/100, and it stayed wrong even after several iterations of prompt fixes. The
-user looked at the same renders and called it 3-4/10 on the spot. Claude is the
-harness's judge now — see evaluation.claude_review.apply_claude_scores, which
-merges Claude's own per-criterion scores (assigned after Reading the rendered
+user looked at the same renders and called it 3-4/10 on the spot. the reviewer is the
+harness's judge now — see evaluation.manual_review.apply_review_scores, which
+merges the reviewer's own per-criterion scores (assigned after Reading the rendered
 PNGs) into the result this module produces and recomputes the weighted total.
 That merge step is pure arithmetic; still no network call.
 """
@@ -44,8 +44,8 @@ def evaluate_deck(pptx_path, brief, slide_roles=None, render_dir=None,
     """Deterministic half of the rubric, always: geometric/typographic checks,
     render-based contrast, and N/A-gating for image/infographic criteria the
     deck doesn't even have the media for. Every llm-mode criterion starts as
-    "ожидает оценки Клода" — call claude_review.apply_claude_scores afterward
-    with Claude's own judgment to fill those in and get a real total_100.
+    "ожидает оценки ревьюера" — call manual_review.apply_review_scores afterward
+    with the reviewer's own judgment to fill those in and get a real total_100.
 
     `source_numbers` — the numbers of the source materials, as
     content_package.extract_numbers normalises them: a content package's
@@ -53,7 +53,7 @@ def evaluate_deck(pptx_path, brief, slide_roles=None, render_dir=None,
     extracted from it.
 
     Renders the deck once and records the PNG paths in the result so the caller
-    (and Claude, reviewing them) doesn't need to render a second time."""
+    (and the reviewer, looking at them) doesn't need to render a second time."""
     from content_package import extract_numbers
 
     render_dir = render_dir or os.path.join(EVAL_DIR, "_render")
@@ -143,9 +143,9 @@ def evaluate_deck(pptx_path, brief, slide_roles=None, render_dir=None,
                           + (f"; {scores['1.1']['detail']}" if scores.get('1.1', {}).get('detail') else ""),
             }
 
-    # Everything else (composition, tone, hallucinations, ...) waits for Claude.
+    # Everything else (composition, tone, hallucinations, ...) waits for the reviewer.
     for cid in rubric.CRITERIA:
-        scores.setdefault(cid, {"score": None, "detail": "ожидает оценки Клода"})
+        scores.setdefault(cid, {"score": None, "detail": "ожидает оценки ревьюера"})
 
     total = rubric.weighted_total(scores)
     result = {

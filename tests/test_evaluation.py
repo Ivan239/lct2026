@@ -1,5 +1,5 @@
-"""Evaluation harness — deterministic checks, weighting, and Claude's own
-score-merge step (claude_review). No LLM API is ever called to judge a deck."""
+"""Evaluation harness — deterministic checks, weighting, and the reviewer's own
+score-merge step (manual_review). No LLM API is ever called to judge a deck."""
 
 import sys
 import os
@@ -292,10 +292,10 @@ def test_outline_always_gets_one_image_slide():
     assert len(_enforce_outline_rules(full)) <= MAX_BLOCKS
 
 
-def test_apply_claude_scores_recomputes_total():
-    from evaluation.claude_review import apply_claude_scores
+def test_apply_review_scores_recomputes_total():
+    from evaluation.manual_review import apply_review_scores
 
-    result = {"scores": {cid: {"title": t, "mode": m, "score": None, "detail": "ожидает оценки Клода"}
+    result = {"scores": {cid: {"title": t, "mode": m, "score": None, "detail": "ожидает оценки ревьюера"}
                          for cid, (t, m) in rubric.CRITERIA.items()}}
     # deterministic criteria already scored (as evaluate_deck would leave them)
     for cid in rubric.CRITERIA:
@@ -303,29 +303,29 @@ def test_apply_claude_scores_recomputes_total():
             result["scores"][cid]["score"] = 5
 
     llm_scores = {cid: (5, "ок") for cid, (_, mode) in rubric.CRITERIA.items() if mode == "llm"}
-    out = apply_claude_scores(result, llm_scores)
+    out = apply_review_scores(result, llm_scores)
     assert out["total_100"] == 100.0
     assert out["llm_evaluated"] is True
-    assert out["judge"] == "claude"
+    assert out["judge"] == "reviewer"
 
 
-def test_apply_claude_scores_rejects_deterministic_ids():
-    from evaluation.claude_review import apply_claude_scores
+def test_apply_review_scores_rejects_deterministic_ids():
+    from evaluation.manual_review import apply_review_scores
     result = {"scores": {cid: {"title": t, "mode": m, "score": None, "detail": ""}
                          for cid, (t, m) in rubric.CRITERIA.items()}}
     det_id = next(cid for cid, (_, mode) in rubric.CRITERIA.items() if mode == "det")
     try:
-        apply_claude_scores(result, {det_id: (5, "не моя забота")})
+        apply_review_scores(result, {det_id: (5, "не моя забота")})
         assert False, "should have rejected a deterministic-mode criterion id"
     except ValueError:
         pass
 
 
-def test_apply_claude_scores_partial_leaves_rest_na():
-    from evaluation.claude_review import apply_claude_scores
-    result = {"scores": {cid: {"title": t, "mode": m, "score": None, "detail": "ожидает оценки Клода"}
+def test_apply_review_scores_partial_leaves_rest_na():
+    from evaluation.manual_review import apply_review_scores
+    result = {"scores": {cid: {"title": t, "mode": m, "score": None, "detail": "ожидает оценки ревьюера"}
                          for cid, (t, m) in rubric.CRITERIA.items()}}
-    out = apply_claude_scores(result, {"1.3": (2, "верх плотный, низ пустой")})
+    out = apply_review_scores(result, {"1.3": (2, "верх плотный, низ пустой")})
     assert out["scores"]["1.3"]["score"] == 2
     assert out["scores"]["1.6"]["score"] is None  # untouched llm criterion stays N/A
 

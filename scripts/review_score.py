@@ -1,11 +1,11 @@
-"""Apply Claude's own visual/content judgment to a deterministic-only evaluation.
+"""Apply the reviewer's own visual/content judgment to a deterministic-only evaluation.
 
-No LLM API involved — Claude looks at the rendered slide PNGs directly (Read
+No LLM API involved — the reviewer looks at the rendered slide PNGs directly (Read
 tool), then calls this with its own scores for the llm-mode rubric criteria.
 This just merges the judgment into the eval JSON in place and recomputes the
 weighted total.
 
-    .venv/bin/python3 scripts/claude_score.py --eval output/evaluations/xyz.json \
+    .venv/bin/python3 scripts/review_score.py --eval output/evaluations/xyz.json \
         --scores '{"1.3": [3, "верх слайда плотный, низ пустой"], "5.6": [5, "источников нет, но и не выдуманы"]}'
 
 --scores is a JSON object: {criterion_id: [score_1_to_5_or_null, "detail"]}.
@@ -19,7 +19,7 @@ import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
-from evaluation.claude_review import apply_claude_scores
+from evaluation.manual_review import apply_review_scores
 from evaluation.evaluate import format_report
 
 
@@ -35,7 +35,7 @@ def main():
 
     raw = json.loads(args.scores)
     scores = {cid: (v[0], v[1]) for cid, v in raw.items()}
-    result = apply_claude_scores(result, scores)
+    result = apply_review_scores(result, scores)
 
     result.pop("_json_path", None)
     with open(args.eval, "w", encoding="utf-8") as f:

@@ -33,8 +33,8 @@ BASE = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 TEMPLATES_DIR = os.path.join(BASE, "output", "templates")
 
 # Rotated across iterations for diversification. Max first — it's the verified
-# flagship. No judge model here anymore — Claude scores the LLM-mode criteria
-# by looking at the renders (see evaluation.claude_review), not an API call.
+# flagship. No judge model here anymore — the reviewer scores the LLM-mode criteria
+# by looking at the renders (see evaluation.manual_review), not an API call.
 ROTATION = ["GigaChat-2-Max", "GigaChat-2-Pro", "GigaChat-2", "GigaChat-3-Ultra"]
 
 # REAL customer templates, not the 4-slide toy presets. The presets were useful
@@ -215,13 +215,13 @@ def main():
 
     # No LLM judge is called, ever — GigaChat vision was measured to be a bad
     # one (scored a duplicate-slides, half-empty deck 90+/100; the user looked
-    # at the same renders and called it 3-4/10). Claude IS the judge: look at
-    # every PNG below, then finalize with scripts/claude_score.py.
+    # at the same renders and called it 3-4/10). the reviewer IS the judge: look at
+    # every PNG below, then finalize with scripts/review_score.py.
     print("\n>>> ПОСМОТРИ ГЛАЗАМИ на каждый слайд (Read) — ты судья, не число выше:")
     for p in ev["png_paths"]:
         print("    " + p)
     print(f"\nПосле просмотра примени свою оценку:")
-    print(f'    .venv/bin/python3 scripts/claude_score.py --eval {ev["_json_path"]} '
+    print(f'    .venv/bin/python3 scripts/review_score.py --eval {ev["_json_path"]} '
           f'--scores \'{{"1.3": [4, "..."], ...}}\'')
 
     if args.out_json:
