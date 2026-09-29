@@ -38,6 +38,7 @@ from matcher.matcher import match_content_to_slides, plan_from_outline
 from evaluation.deterministic import unsourced_numbers
 from qa.geometry import find_sparse_slides
 from rendering.render import render_pptx_to_pngs
+from rendering.export import export_all
 from template_parser.parser import extract_template
 from template_spec.builder import build_spec
 
@@ -631,6 +632,17 @@ def _generate_deck(template_id, brief, model=None, source_numbers=None, slides=N
 
     slide_urls = [f"/static/generated/{os.path.basename(p)}" for p in slide_png_paths]
 
+    # .pdf и .html (ТЗ: три формата) — из того же рендера, что и превью:
+    # LibreOffice повторно не запускается. Сбой экспорта не отменяет .pptx.
+    exports = {}
+    try:
+        exported = export_all(out_pptx, GENERATED_DIR, png_paths=slide_png_paths)
+        exports = {"pdf_url": f"/static/generated/{generation_id}.pdf",
+                   "html_url": f"/static/generated/{generation_id}.html",
+                   "substituted_fonts": exported["substituted_fonts"]}
+    except Exception as e:  # noqa: BLE001
+        print(f"! экспорт .pdf/.html не собран: {e}", flush=True)
+
     # Final-deck sanity warnings (free, no LLM): the plan's order IS the final
     # slide order, so each position's role is known — dividers/closings are
     # sparse by design and excluded inside the check.
@@ -653,6 +665,7 @@ def _generate_deck(template_id, brief, model=None, source_numbers=None, slides=N
     return {
         "generation_id": generation_id,
         "download_url": f"/static/generated/{generation_id}.pptx",
+        **exports,
         "slides": slide_urls,
         "plan": [
             {

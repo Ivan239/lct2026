@@ -18,6 +18,12 @@
   }
 }
 
+.downloads {
+  display: flex;
+  flex-wrap: wrap;
+  gap: v.$space-2;
+}
+
 .plan {
   list-style: none;
   margin: 0 0 v.$space-4;

@@ -101,8 +101,10 @@ def _prepare_render_copy(pptx_path, tmp_dir):
     return copy_path
 
 
-def render_pptx_to_pngs(pptx_path, out_dir):
-    """Converts a pptx to one PNG per slide in out_dir, returns sorted list of PNG paths."""
+def convert_to_pdf(pptx_path, out_dir):
+    """pptx → {out_dir}/{name}.pdf через LibreOffice. Недостающие на хосте
+    шрифты подменяются в КОПИИ (см. _prepare_render_copy) — исходный .pptx не
+    трогается. Возвращает путь к PDF."""
     os.makedirs(out_dir, exist_ok=True)
     soffice = _find_soffice()
     name = os.path.splitext(os.path.basename(pptx_path))[0]
@@ -117,8 +119,36 @@ def render_pptx_to_pngs(pptx_path, out_dir):
         )
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
+    return os.path.join(out_dir, f"{name}.pdf")
 
-    pdf_path = os.path.join(out_dir, f"{name}.pdf")
+
+# Тема перечисляет шрифт на КАЖДУЮ письменность (<a:font script="Thai"
+# typeface="Angsana New"/>): на VK Tech это 28 семейств, которыми наш текст не
+# набран. Подменять их безвредно, а называть пользователю — шум, в котором
+# теряются два настоящих (Calibri, Play).
+_SCRIPT_FONT_RE = re.compile(rb'<a:font script="[^"]*" typeface="[^"]*"\s*/>')
+
+
+def substituted_typefaces(pptx_path):
+    """Семейства, которых нет на этом хосте и которые в PDF/PNG заменены на
+    FALLBACK_TYPEFACE. Пусто — рендер честный, как в PowerPoint."""
+    faces = set()
+    with zipfile.ZipFile(pptx_path) as z:
+        for name in z.namelist():
+            if name.endswith(".xml"):
+                data = _SCRIPT_FONT_RE.sub(b"", z.read(name))
+                for match in _TYPEFACE_RE.finditer(data):
+                    face = match.group(1).decode("utf-8", errors="ignore")
+                    if face and not face.startswith("+"):
+                        faces.add(face)
+    return sorted(f for f in faces if _normalize(f) not in _installed_families())
+
+
+def render_pptx_to_pngs(pptx_path, out_dir):
+    """Converts a pptx to one PNG per slide in out_dir, returns sorted list of PNG paths.
+    Side effect used by export: {out_dir}/{name}.pdf stays next to the PNGs."""
+    name = os.path.splitext(os.path.basename(pptx_path))[0]
+    pdf_path = convert_to_pdf(pptx_path, out_dir)
     subprocess.run(
         ["pdftoppm", "-png", "-r", "150", pdf_path, os.path.join(out_dir, name)],
         check=True,

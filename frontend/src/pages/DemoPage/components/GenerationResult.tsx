@@ -9,10 +9,29 @@ export function GenerationResult({ result }: { result: GenerateResponse }) {
     <div className={styles.wrap}>
       <div className={styles.head}>
         <h3>План сборки</h3>
-        <a href={resolveUrl(result.download_url)} download>
-          <Button>Скачать .pptx</Button>
-        </a>
+        <div className={styles.downloads}>
+          <a href={resolveUrl(result.download_url)} download>
+            <Button>Скачать .pptx</Button>
+          </a>
+          {result.pdf_url && (
+            <a href={resolveUrl(result.pdf_url)} download>
+              <Button>.pdf</Button>
+            </a>
+          )}
+          {result.html_url && (
+            <a href={resolveUrl(result.html_url)} download>
+              <Button>.html</Button>
+            </a>
+          )}
+        </div>
       </div>
+
+      {(result.substituted_fonts?.length ?? 0) > 0 && (
+        <p className={styles.packageLine}>
+          В превью, .pdf и .html шрифты {result.substituted_fonts!.join(', ')} заменены на Arial —
+          их нет на сервере рендера. В .pptx шрифты оригинальные.
+        </p>
+      )}
 
       {result.package && (
         <p className={styles.packageLine}>

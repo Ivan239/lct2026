@@ -17,7 +17,9 @@
 import argparse
 import json
 import os
+import shutil
 import sys
+import tempfile
 import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
@@ -26,6 +28,8 @@ from content_package import load_package, to_brief_text  # noqa: E402
 from content_parser.variants import VARIANTS, variant_slides  # noqa: E402
 from evaluation.loop import ensure_template, generate_deck  # noqa: E402
 from llm_clients.backends import open_weights_client  # noqa: E402
+from rendering.export import build_html  # noqa: E402
+from rendering.render import render_pptx_to_pngs, substituted_typefaces  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES = os.path.join(ROOT, "output", "templates")
@@ -50,6 +54,21 @@ def _client(model_arg):
     return GigaChatClient(verify_ssl=False), (model_arg or "GigaChat-2-Max")
 
 
+def export_deck(out_pptx):
+    """.pdf и .html рядом с .pptx (ТЗ: три формата). PNG рендера — во
+    временный каталог: в папке сдачи им не место."""
+    out_dir = os.path.dirname(out_pptx)
+    name = os.path.splitext(os.path.basename(out_pptx))[0]
+    tmp = tempfile.mkdtemp(prefix="export_")
+    try:
+        pngs = render_pptx_to_pngs(out_pptx, tmp)
+        shutil.copy(os.path.join(tmp, f"{name}.pdf"), os.path.join(out_dir, f"{name}.pdf"))
+        build_html(out_pptx, pngs, os.path.join(out_dir, f"{name}.html"),
+                   substituted=substituted_typefaces(out_pptx))
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
 def build(template, variant, client, model, brief, slides):
     src = os.path.join(TEMPLATES, f"{template}.pptx")
     t = ensure_template(client, model, src, template)
@@ -65,6 +84,7 @@ def build(template, variant, client, model, brief, slides):
     seconds = round(time.monotonic() - started, 1)
     print(f"  {template}/{variant}: {len(plan)} слайдов за {seconds} с"
           + (f", пропущено {len(skipped)}" if skipped else ""), flush=True)
+    export_deck(out_pptx)
     return {"template": template, "variant": variant, "slides": len(plan),
             "seconds": seconds, "path": os.path.relpath(out_pptx, ROOT)}
 
@@ -76,7 +96,18 @@ def main():
     ap.add_argument("--model", default=None, help="имя модели у провайдера")
     ap.add_argument("--slides", type=int, default=None,
                     help="заказать длину явно; по умолчанию её выбирает вариант")
+    ap.add_argument("--export-only", action="store_true",
+                    help="без модели: досоздать .pdf/.html для уже собранных .pptx")
     args = ap.parse_args()
+
+    if args.export_only:
+        for template in args.template or list(TEMPLATE_TITLES):
+            for variant in args.variant or list(VARIANTS):
+                path = os.path.join(OUT, template, f"{variant}.pptx")
+                if os.path.exists(path):
+                    export_deck(path)
+                    print(f"  {template}/{variant}: .pdf и .html готовы", flush=True)
+        return
 
     templates = args.template or list(TEMPLATE_TITLES)
     variants = args.variant or list(VARIANTS)
@@ -112,6 +143,8 @@ def main():
              "## Ось различий", ""]
     for name, spec in VARIANTS.items():
         lines.append(f"- **{spec['title']}** (`{name}`) — {spec['description']}.")
+    lines += ["", "Каждая колода лежит в трёх форматах: `.pptx` (редактируемый, основной),",
+              "`.pdf` и `.html` (для просмотра)."]
     lines += ["", "Различается только ПЛАН колоды: состав слайдов, их число и порядок.",
               "Вёрстка у всех трёх одна и та же, поэтому ни один вариант не соблюдает",
               "правила шаблона хуже другого.", "", "## Собранные колоды", "",

@@ -62,6 +62,9 @@ def open_weights_config():
         "base_url": base,
         "model": os.environ.get("LLM_MODEL") or os.environ.get("RTX_MODEL", "open"),
         "api_key": os.environ.get("LLM_API_KEY") or os.environ.get("RTX_API_KEY"),
+        # Проверка TLS включена: у провайдеров (Cloud.ru и т.п.) сертификат
+        # валидный. Выключать — только для самоподписанного локального vLLM.
+        "verify_ssl": os.environ.get("LLM_VERIFY_SSL", "1").lower() not in ("0", "false", "no"),
     }
 
 
@@ -75,7 +78,7 @@ def open_weights_client():
     if not cfg:
         return None
     client = OpenAICompatClient(cfg["base_url"], api_key=cfg["api_key"],
-                                default_model=cfg["model"], verify_ssl=False)
+                                default_model=cfg["model"], verify_ssl=cfg["verify_ssl"])
     return client, cfg["model"]
 
 

@@ -54,6 +54,9 @@ export interface PackageSummary {
 export interface GenerateResponse {
   generation_id: string
   download_url: string
+  pdf_url?: string
+  html_url?: string
+  substituted_fonts?: string[]
   slides: string[]
   plan: PlanItem[]
   skipped: SkippedItem[]

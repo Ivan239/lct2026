@@ -19,11 +19,37 @@ LLM_API_KEY=<если требуется>
 При старте API печатает, на какой модели он работает:
 `[api] генератор: Qwen/Qwen2.5-32B-Instruct через https://…/v1`.
 
+## На чём собрано решение (для экспертов)
+
+| Что | Значение |
+|---|---|
+| Сервис | [Cloud.ru Evolution Foundation Models](https://cloud.ru/products/evolution-foundation-models) — российский провайдер, OpenAI-совместимый API, оплата в рублях |
+| Endpoint | `https://foundation-models.api.cloud.ru/v1` |
+| Модель | [`Qwen/Qwen3-32B`](https://huggingface.co/Qwen/Qwen3-32B) — 32.8B, открытые веса, **Apache 2.0** |
+| Настройки | `temperature` и `top_p` — умолчания провайдера (в запросе не передаются); `max_tokens` 300–1600 по типу вызова; `LLM_VERIFY_SSL=1` |
+| Режим рассуждений | не включается; если модель всё же пришлёт `<think>…</think>`, он отрезается до разбора JSON (`common/json_utils.py`) |
+| Время | колода в 10–15 слайдов — 30–75 с вместе с вёрсткой и рендером (лимит кейса — 5 мин) |
+| Стоимость | ~37 ₽ за 1М входных и ~148 ₽ за 1М выходных токенов: колода обходится в единицы рублей |
+
+Все девять колод сдачи (`scripts/make_submission.py`: 3 варианта вёрстки × 3
+шаблона) и прогон на видео сделаны на этой конфигурации:
+
+```bash
+LLM_BASE_URL=https://foundation-models.api.cloud.ru/v1
+LLM_MODEL=Qwen/Qwen3-32B
+LLM_API_KEY=<API-ключ Cloud.ru Foundation Models>
+```
+
+Ключ в репозиторий не кладётся (`.env` в `.gitignore`). Чтобы воспроизвести,
+нужен свой API-ключ Cloud.ru — или любой другой endpoint с открытой моделью
+до 35B, правок кода это не требует.
+
 ## Чем проверено и что рекомендуется
 
 | Модель | Параметры | Лицензия | Роль в пайплайне |
 |---|---|---|---|
-| [Qwen2.5-32B-Instruct](https://huggingface.co/Qwen/Qwen2.5-32B-Instruct) | 32B | Apache 2.0 | основная: план колоды и текст блоков |
+| [Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B) | 32.8B | Apache 2.0 | **основная**: план колоды и текст блоков (Cloud.ru) |
+| [Qwen2.5-32B-Instruct](https://huggingface.co/Qwen/Qwen2.5-32B-Instruct) | 32B | Apache 2.0 | для самостоятельного хостинга через vLLM |
 | [Qwen2.5-14B-Instruct](https://huggingface.co/Qwen/Qwen2.5-14B-Instruct) | 14B | Apache 2.0 | экономичный режим, когда важна скорость |
 | [Mistral-Small-24B-Instruct](https://huggingface.co/mistralai/Mistral-Small-24B-Instruct-2501) | 24B | Apache 2.0 | альтернатива с тем же интерфейсом |
 
@@ -90,7 +116,7 @@ LLM_API_KEY=<если требуется>
 пока настраивался собственный инференс. Код от него не зависит: клиент
 GigaChat остаётся в репозитории только как запасной путь разработки и
 включается, лишь если `LLM_BASE_URL` не задан. Для сдачи и демонстрации сервис
-работает на модели с открытыми весами из таблицы выше.
+работает на `Qwen/Qwen3-32B` через Cloud.ru (см. «На чём собрано решение»).
 
 Vision-модели в продукте не используются: классификация слайдов идёт по
 структуре (типы фигур, их геометрия, абзацы), а не по картинке — это дешевле и
