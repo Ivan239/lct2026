@@ -4,14 +4,37 @@
     {
       "name": "backend",
       "runtimeExecutable": "/Users/ivan239/llm_pres/.venv/bin/uvicorn",
-      "runtimeArgs": ["src.api.main:app", "--app-dir", ".", "--port", "8000"],
+      "runtimeArgs": [
+        "src.api.main:app",
+        "--app-dir",
+        ".",
+        "--port",
+        "8000"
+      ],
       "port": 8000
     },
     {
       "name": "frontend",
       "runtimeExecutable": "npm",
-      "runtimeArgs": ["--prefix", "frontend", "run", "dev"],
+      "runtimeArgs": [
+        "--prefix",
+        "frontend",
+        "run",
+        "dev"
+      ],
       "port": 5173
+    },
+    {
+      "name": "submission",
+      "runtimeExecutable": "/Users/ivan239/llm_pres/.venv/bin/python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "8766",
+        "--directory",
+        "/Users/ivan239/llm_pres/output/submission"
+      ],
+      "port": 8766
     }
   ]
 }

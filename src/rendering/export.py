@@ -97,7 +97,10 @@ _PAGE = """<!doctype html>
 def build_html(pptx_path, png_paths, out_html, title=None, substituted=()):
     """Собирает самодостаточный HTML из уже отрендеренных PNG (без LibreOffice)."""
     texts = slide_texts(pptx_path)
-    title = title or os.path.splitext(os.path.basename(pptx_path))[0]
+    # Название — с титульного слайда: имя файла («compact», «a1b2c3d4») читателю
+    # ничего не говорит.
+    title = title or (texts[0][0] if texts and texts[0] else
+                      os.path.splitext(os.path.basename(pptx_path))[0])
     sections = []
     for i, png in enumerate(png_paths):
         with open(png, "rb") as f:
