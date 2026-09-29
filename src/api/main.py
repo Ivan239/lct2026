@@ -131,11 +131,43 @@ _template_registry = {}
 # Live progress of the generation currently running. One global slot: the demo
 # runs one generation at a time, and a stale read merely shows a slightly-off
 # stage label — not worth a job-queue architecture at this stage.
-_progress = {"active": False, "stage": "", "done": 0, "total": 0}
+# Прогресс — по «полосам»: у каждого параллельного варианта своя. Одна общая
+# ячейка на три потока давала в кнопке то «11/11», то «10/14» (чей поток
+# записал последним), а первый закончивший вариант гасил прогресс остальных.
+_progress_lanes = {}
+_progress_lock = threading.Lock()
+_lane = threading.local()
 
 
 def _set_progress(stage, done=0, total=0, active=True):
-    _progress.update({"active": active, "stage": stage, "done": done, "total": total})
+    name = getattr(_lane, "name", None) or "main"
+    with _progress_lock:
+        if active:
+            _progress_lanes[name] = {"stage": stage, "done": done, "total": total}
+        else:
+            _progress_lanes.pop(name, None)
+
+
+def _progress_snapshot():
+    with _progress_lock:
+        lanes = dict(_progress_lanes)
+    if not lanes:
+        return {"active": False, "stage": "", "done": 0, "total": 0}
+    if len(lanes) == 1:
+        (lane,) = lanes.values()
+        return {"active": True, **lane}
+    parts = []
+    for name in VARIANTS:  # стабильный порядок: компактный, подробный, визуальный
+        lane = lanes.get(name)
+        if lane is None:
+            continue
+        title = VARIANTS[name]["title"]
+        if lane["total"]:
+            parts.append(f"{title} {min(lane['done'] + 1, lane['total'])}/{lane['total']}")
+        else:
+            parts.append(f"{title}: {lane['stage'].lower()}")
+    return {"active": True, "stage": "Пишем три варианта — " + " · ".join(parts),
+            "done": 0, "total": 0}
 
 
 def _slide_urls(template_id):
@@ -293,6 +325,10 @@ def _bootstrap_customs():
         if not os.path.exists(_archetypes_path(template_id)):
             continue
         meta = _load_meta(template_id) or {"name": template_id, "is_preset": False}
+        # Регрессионный корпус (деки, на которых ловились дефекты) лежит в том
+        # же каталоге, но пользователю его не показываем: «hidden» в мете.
+        if meta.get("hidden"):
+            continue
         _template_registry[template_id] = {"id": template_id, "name": meta["name"], "is_preset": False}
 
 
@@ -579,7 +615,7 @@ def _plan_legacy(brief, archetype_map, template_path, model=None):
 
 @app.get("/api/progress")
 def get_progress():
-    return _progress
+    return _progress_snapshot()
 
 
 @app.post("/api/generate")
@@ -604,11 +640,15 @@ def _three_variants(template_id, brief, model, source_numbers=None, slides=None)
     names = list(VARIANTS)
 
     def one(name):
+        _lane.name = name
         try:
             return _generate_deck(template_id, brief, model, source_numbers=source_numbers,
                                   slides=slides, variant=name)
         except HTTPException as e:
             return {"variant": name, "variant_title": VARIANTS[name]["title"], "error": e.detail}
+        finally:
+            _set_progress("", active=False)
+            _lane.name = None
 
     with ThreadPoolExecutor(max_workers=len(names)) as pool:
         results = list(pool.map(one, names))
