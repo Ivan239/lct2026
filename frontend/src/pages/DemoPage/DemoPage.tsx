@@ -21,6 +21,16 @@ import { BriefEditor } from './components/BriefEditor'
 import { PackageInput } from './components/PackageInput'
 import { GenerationResult } from './components/GenerationResult'
 import { VariantsResult } from './components/VariantsResult'
+import { HistoryPanel } from './components/HistoryPanel'
+import {
+  addToHistory,
+  entryFromSingle,
+  entryFromVariants,
+  loadHistory,
+  removeFromHistory,
+  updateHistory,
+  type HistoryEntry,
+} from '@/shared/history/history'
 import { EXAMPLE_BRIEF } from './exampleBrief'
 import styles from './DemoPage.module.scss'
 
@@ -61,6 +71,17 @@ export function DemoPage() {
   const [result, setResult] = useState<GenerateResponse | null>(null)
   const [variants, setVariants] = useState<VariantsResponse | null>(null)
   const [threeVariants, setThreeVariants] = useState(true)
+  const [history, setHistory] = useState<HistoryEntry[]>(() => loadHistory())
+  const [currentEntryId, setCurrentEntryId] = useState<string | null>(null)
+
+  const templateName = () => templates.find((t) => t.id === selectedId)?.name ?? 'шаблон'
+
+  function openEntry(entry: HistoryEntry) {
+    setError(null)
+    setResult(entry.single ?? null)
+    setVariants(entry.variants ?? null)
+    setCurrentEntryId(entry.id)
+  }
   const [error, setError] = useState<string | null>(null)
   const [balance, setBalance] = useState<BalanceEntry[] | null>(null)
   const [progressLabel, setProgressLabel] = useState('Собираем презентацию...')
@@ -124,12 +145,18 @@ export function DemoPage() {
           ? await generateVariantsFromPackage(selectedId, packageFile, generateModel)
           : await generateVariants(selectedId, brief, generateModel)
         setVariants(response)
+        const entry = entryFromVariants(response, templateName())
+        setHistory(addToHistory(entry))
+        setCurrentEntryId(entry.id)
       } else {
         const response = packageFile
           ? await generateFromPackage(selectedId, packageFile, generateModel)
           : await generatePresentation(selectedId, brief, generateModel)
         setResult(response)
         if (response.balance) setBalance(response.balance)
+        const entry = entryFromSingle(response, templateName())
+        setHistory(addToHistory(entry))
+        setCurrentEntryId(entry.id)
       }
     } catch (e) {
       setError((e as Error).message)
@@ -189,7 +216,23 @@ export function DemoPage() {
 
         {error && <div className={styles.error}>{error}</div>}
 
-        {variants && <VariantsResult response={variants} onBalance={setBalance} />}
+        <HistoryPanel
+          entries={history}
+          currentId={currentEntryId}
+          onOpen={openEntry}
+          onRemove={(id) => setHistory(removeFromHistory(id))}
+        />
+
+        {variants && (
+          <VariantsResult
+            key={currentEntryId ?? 'variants'}
+            response={variants}
+            onBalance={setBalance}
+            onChange={(next) => {
+              if (currentEntryId) setHistory(updateHistory(currentEntryId, { variants: next }))
+            }}
+          />
+        )}
 
         {result && (
           <GenerationResult
@@ -198,6 +241,7 @@ export function DemoPage() {
             onFixed={(fixed) => {
               setResult(fixed)
               if (fixed.balance) setBalance(fixed.balance)
+              if (currentEntryId) setHistory(updateHistory(currentEntryId, { single: fixed }))
             }}
           />
         )}

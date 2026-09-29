@@ -8,16 +8,22 @@ import styles from './VariantsResult.module.scss'
 export function VariantsResult({
   response,
   onBalance,
+  onChange,
 }: {
   response: VariantsResponse
   onBalance: (balance: BalanceEntry[]) => void
+  onChange?: (next: VariantsResponse) => void
 }) {
   const [items, setItems] = useState(response.variants)
   const [active, setActive] = useState(0)
   const current = items[active]
 
   function replace(index: number, fixed: GenerateResponse) {
-    setItems((prev) => prev.map((item, i) => (i === index ? { ...fixed, variant_title: item.variant_title } : item)))
+    const next = items.map((item, i) =>
+      i === index ? { ...fixed, variant: item.variant, variant_title: item.variant_title } : item,
+    )
+    setItems(next)
+    onChange?.({ ...response, variants: next })
     if (fixed.balance) onBalance(fixed.balance)
   }
 

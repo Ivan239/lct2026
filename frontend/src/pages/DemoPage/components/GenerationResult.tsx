@@ -50,16 +50,16 @@ export function GenerationResult({
       <div className={styles.head}>
         <h3>План сборки</h3>
         <div className={styles.downloads}>
-          <a href={resolveUrl(result.download_url)} download>
+          <a href={resolveUrl(result.download_url)} download target="_blank" rel="noopener noreferrer">
             <Button>Скачать .pptx</Button>
           </a>
           {result.pdf_url && (
-            <a href={resolveUrl(result.pdf_url)} download>
+            <a href={resolveUrl(result.pdf_url)} target="_blank" rel="noopener noreferrer">
               <Button>.pdf</Button>
             </a>
           )}
           {result.html_url && (
-            <a href={resolveUrl(result.html_url)} download>
+            <a href={resolveUrl(result.html_url)} target="_blank" rel="noopener noreferrer">
               <Button>.html</Button>
             </a>
           )}

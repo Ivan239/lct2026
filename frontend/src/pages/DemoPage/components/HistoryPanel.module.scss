@@ -1,0 +1,75 @@
+@use '@/shared/styles/variables' as v;
+
+.wrap {
+  margin-bottom: v.$space-4;
+  border: 1px solid v.$color-border;
+  border-radius: v.$radius-sm;
+  padding: v.$space-2 v.$space-3;
+}
+
+.summary {
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: v.$color-navy;
+}
+
+.list {
+  list-style: none;
+  margin: v.$space-2 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: v.$space-1;
+
+  li {
+    display: flex;
+    align-items: center;
+    gap: v.$space-2;
+    border-radius: v.$radius-sm;
+  }
+}
+
+.current {
+  background: rgba(30, 40, 90, 0.06);
+}
+
+.open {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: v.$space-2;
+  border: none;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  color: v.$color-navy;
+}
+
+.title {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.meta {
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+.remove {
+  border: none;
+  background: transparent;
+  font-size: 18px;
+  line-height: 1;
+  padding: v.$space-1 v.$space-2;
+  cursor: pointer;
+  color: v.$color-navy;
+  opacity: 0.5;
+
+  &:hover {
+    opacity: 1;
+  }
+}
