@@ -21,7 +21,7 @@ from pptx.util import Inches
 from pydantic import BaseModel
 
 from common.model_fallback import TEXT_MODELS
-from common.pictures import has_oversized_picture
+from common.pictures import has_data_object, has_oversized_picture
 from common.synthesis import SYNTHESIZE
 from content_package import ContentPackageError, extract_numbers, load_package, to_brief_text
 from content_parser.parser import RESIZE_FIELD_BY_TYPE, parse_brief, resize_block
@@ -428,7 +428,12 @@ def _synth_canvas_hints(template_id, plan):
                 and not (s.width >= prs.slide_width * 0.9)  # full-bleed folder art is background, keep
                 for s in slide.shapes
             )
-            if has_photo:
+            # Нативная таблица или диаграмма тоже не мебель: снятие текстбоксов
+            # её не трогает, и синтезированный слайд выходил поверх таблицы
+            # шаблона с «Заголовок / Текст» в ячейках (VK WorkSpace, колоды
+            # сдачи). Подбор слайдов исключал их давно (has_data_object в
+            # build_spec) — выбор канвы шёл мимо этого правила.
+            if has_photo or has_data_object(slide):
                 continue
             n_boxes = canvas_content_count(slide)
             candidates.append((n_boxes, idx, profile["backgrounds"].get(idx)))

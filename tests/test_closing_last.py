@@ -33,7 +33,7 @@ def test_mid_deck_closing_moves_to_the_end():
     outline = [_item("title", "обложка"), _item("bullet_list", "проблема"),
                _item("closing", "запросить решение"), _item("stats_kpi", "результаты"),
                _item("bullet_list", "план")]
-    got = generate_outline(FakeClient(outline), "бриф", SPEC, models=["m"], slides=6)
+    got = generate_outline(FakeClient(outline), "бриф", SPEC, models=["m"], slides=6, images_available=True)
     roles = [b["role"] for b in got]
     assert roles[-1] == "closing" and roles.count("closing") == 1, roles
     assert roles.index("image_caption") < roles.index("closing"), roles
@@ -44,6 +44,6 @@ def test_mid_deck_closing_moves_to_the_end():
 def test_two_closings_become_one():
     outline = [_item("title", "обложка"), _item("closing", "спасибо"),
                _item("stats_kpi", "результаты"), _item("closing", "утвердить пилот")]
-    got = generate_outline(FakeClient(outline), "бриф", SPEC, models=["m"], slides=4)
+    got = generate_outline(FakeClient(outline), "бриф", SPEC, models=["m"], slides=4, images_available=True)
     closings = [b["theme"] for b in got if b["role"] == "closing"]
     assert closings == ["утвердить пилот"] and got[-1]["role"] == "closing", got

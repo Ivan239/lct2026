@@ -70,12 +70,20 @@ def _validate_outline(outline):
     return outline
 
 
-def _enforce_outline_rules(outline, max_blocks=MAX_BLOCKS):
-    """Hard rules the model has demonstrably ignored when merely asked."""
+def _enforce_outline_rules(outline, max_blocks=MAX_BLOCKS, images_available=False):
+    """Hard rules the model has demonstrably ignored when merely asked.
+
+    images_available: есть ли чем заполнить слайд «картинка + подпись».
+    Изображения сервис не генерирует (задача со звёздочкой, только топ-10), и
+    без картинки такой слайд выходит пустой рамкой с надписью «ИЗОБРАЖЕНИЕ» —
+    в девяти колодах сдачи таких было девять, и выглядели они недоделкой.
+    Нет картинки — нет и слайда под неё."""
     result = []
     dividers = 0
     images = 0
     for item in outline[:max_blocks]:
+        if item["role"] == "image_caption" and not images_available:
+            continue
         if item["role"] == "section_divider":
             dividers += 1
             if dividers > MAX_SECTION_DIVIDERS:
@@ -112,7 +120,7 @@ def _enforce_outline_rules(outline, max_blocks=MAX_BLOCKS):
     # the time — same lesson as the divider cap: state it as a rule, enforce it
     # in code. Placed just before the closing (a visual right before the CTA),
     # and only when there's room under max_blocks.
-    if images == 0 and len(result) < max_blocks:
+    if images_available and images == 0 and len(result) < max_blocks:
         # Theme wording matters twice over: the model ECHOES it into the title,
         # and a vague one starves the block. "визуальная иллюстрация продукта"
         # produced a generic "Продукт X — визуализация"; a concrete, natural
@@ -135,7 +143,7 @@ def deck_size_bounds(slides=None):
 
 
 def generate_outline(client, brief, spec, models=TEXT_MODELS, style_preamble="", slides=None,
-                     variant=None):
+                     variant=None, images_available=False):
     """Outline of `slides` blocks when given (a content package's `slides`),
     DECK_MIN_SLIDES..DECK_MAX_SLIDES otherwise.
 
@@ -170,27 +178,30 @@ def generate_outline(client, brief, spec, models=TEXT_MODELS, style_preamble="",
         return call
 
     outline = _enforce_outline_rules(call_with_model_fallback(make_call(prompt), models),
-                                     max_blocks=high)
+                                     max_blocks=high, images_available=images_available)
     if len(outline) < low:
         note = (f"\n\nВ прошлом ответе было {len(outline)} блоков, а нужно "
                 f"{'ровно ' + str(low) if low == high else f'от {low} до {high}'}. "
                 "Раскрой бриф подробнее и ответь полным списком блоков.")
         try:
             longer = _enforce_outline_rules(
-                call_with_model_fallback(make_call(prompt + note), models), max_blocks=high)
+                call_with_model_fallback(make_call(prompt + note), models), max_blocks=high,
+                images_available=images_available)
             if len(longer) > len(outline):
                 outline = longer
         except Exception:  # noqa: BLE001 — the first outline stands
             pass
     if len(outline) < low:
-        outline = _ask_for_missing_blocks(client, outline, brief, menu, low, high, models)
+        outline = _ask_for_missing_blocks(client, outline, brief, menu, low, high, models,
+                                          images_available=images_available)
     return outline
 
 
 MORE_BLOCKS_PROMPT = "outline_more.v1.txt"
 
 
-def _ask_for_missing_blocks(client, outline, brief, menu, low, high, models):
+def _ask_for_missing_blocks(client, outline, brief, menu, low, high, models,
+                            images_available=False):
     """Ask for the MISSING blocks only, and append them.
 
     Asking the whole outline again gets the same length back: three decks in a
@@ -219,12 +230,14 @@ def _ask_for_missing_blocks(client, outline, brief, menu, low, high, models):
         return outline
     seen = {str(item.get("theme", "")).strip().lower() for item in outline}
     fresh = [item for item in extra
-             if str(item.get("theme", "")).strip().lower() not in seen][:missing]
+             if str(item.get("theme", "")).strip().lower() not in seen
+             and (images_available or item.get("role") != "image_caption")][:missing]
     if not fresh:
         return outline
     # The closing stays last: _enforce_outline_rules moves it there anyway, and
     # new blocks belong before the wrap-up.
-    return _enforce_outline_rules(outline + fresh, max_blocks=high)
+    return _enforce_outline_rules(outline + fresh, max_blocks=high,
+                                  images_available=images_available)
 
 
 # A KPI figure is a number plus at most a short unit: "+25%", "-30 часов",

@@ -20,7 +20,7 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.util import Inches
 
-from common.pictures import has_oversized_picture
+from common.pictures import has_data_object, has_oversized_picture
 from common.synthesis import SYNTHESIZE
 from design_system.extractor import _describe_slide, build_archetype_map
 from design_system.fingerprint_cache import FingerprintCache
@@ -185,7 +185,12 @@ def _synth_canvas_hints(source_pptx, plan, profile):
                 and not (s.width >= prs.slide_width * 0.9)
                 for s in slide.shapes
             )
-            if has_photo:
+            # Нативная таблица или диаграмма тоже не мебель: снятие текстбоксов
+            # её не трогает, и синтезированный слайд выходил поверх таблицы
+            # шаблона с «Заголовок / Текст» в ячейках (VK WorkSpace, колоды
+            # сдачи). Подбор слайдов исключал их давно (has_data_object в
+            # build_spec) — выбор канвы шёл мимо этого правила.
+            if has_photo or has_data_object(slide):
                 continue
             candidates.append((canvas_content_count(slide), idx, profile["backgrounds"].get(idx)))
         if not candidates:

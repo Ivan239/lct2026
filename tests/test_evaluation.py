@@ -261,7 +261,7 @@ def test_outline_always_gets_one_image_slide():
     from content_parser.two_phase import MAX_BLOCKS, _enforce_outline_rules
 
     def roles(outline):
-        return [i["role"] for i in _enforce_outline_rules(outline)]
+        return [i["role"] for i in _enforce_outline_rules(outline, images_available=True)]
 
     # none requested -> exactly one inserted, just before the closing
     out = roles([{"role": "title", "theme": "t", "count": None},
@@ -371,7 +371,7 @@ def test_outline_always_ends_with_a_closing():
     from content_parser.two_phase import MAX_BLOCKS, _enforce_outline_rules
 
     def roles(outline):
-        return [i["role"] for i in _enforce_outline_rules(outline)]
+        return [i["role"] for i in _enforce_outline_rules(outline, images_available=True)]
 
     # model omitted the closing -> one is appended at the end
     out = roles([{"role": "title", "theme": "t", "count": None},

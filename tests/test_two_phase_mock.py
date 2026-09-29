@@ -43,7 +43,7 @@ def test_outline_retries_malformed_json_then_succeeds():
     ])
     client = FakeClient(["это не json {", good])
     # slides=4: this test is about the JSON retry, not the deck size
-    outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"], slides=4)
+    outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"], slides=4, images_available=True)
     assert client.calls == 2
     # image_caption and the final closing are both enforced in code
     # (_enforce_outline_rules), not something the model was asked for here
@@ -255,7 +255,7 @@ def test_a_short_outline_gets_one_corrective_call_with_the_count():
     loop deck came out 8-9. A short outline is sent back once, saying how many
     blocks came and how many are needed; the longer one is kept."""
     client = RecordingClient([_outline(6), _outline(11)])
-    outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"])
+    outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"], images_available=True)
     assert client.calls == 2
     assert "10-15" in client.prompts[0]
     assert "было 7 блоков" in client.prompts[1] and "от 10 до 15" in client.prompts[1]
@@ -266,13 +266,13 @@ def test_a_failed_correction_keeps_the_first_outline_instead_of_failing():
     """No deck at all is worse than a short one (iter113 lost a whole run to
     one malformed block)."""
     client = RecordingClient([_outline(6)])          # the corrective call finds nothing
-    outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"])
+    outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"], images_available=True)
     assert len(outline) == 7                          # 6 + the enforced image slide
 
 
 def test_an_asked_size_is_exact_and_the_cap_follows_it():
     client = RecordingClient([_outline(14)])
-    outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"], slides=12)
+    outline = generate_outline(client, "бриф", SPEC, models=["GigaChat"], slides=12, images_available=True)
     assert "РОВНО 12" in client.prompts[0]
     assert len(outline) == 12 and outline[-1]["role"] == "closing"
 
