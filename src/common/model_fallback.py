@@ -42,6 +42,20 @@ TRANSIENT_NETWORK_ERRORS = (
 )
 NETWORK_RETRY_DELAY_SECONDS = 1.5
 
+# 429 — лимит провайдера на частоту, а не сбой сети: три варианта вёрстки идут
+# параллельно, и Cloud.ru отвечал «Too Many Requests». Пять попыток по 1,5 с
+# (7 секунд) короче окна лимита — вариант падал целиком. Пауза растёт (или
+# берётся из Retry-After) и НЕ расходует попытки на битый JSON.
+RATE_LIMIT_DELAYS_SECONDS = (2, 4, 8, 16, 20, 20)
+
+
+def _retry_after_seconds(error):
+    try:
+        value = float(error.response.headers.get("Retry-After"))
+    except (AttributeError, TypeError, ValueError):
+        return None
+    return min(max(value, 0.5), 30)
+
 
 def call_with_model_fallback(call_fn, models, retries_per_model=5):
     """call_fn(model) -> result, where call_fn is expected to raise ValueError/KeyError
@@ -61,7 +75,10 @@ def call_with_model_fallback(call_fn, models, retries_per_model=5):
     last_content_error = None
     last_network_error = None
     for model in models:
-        for attempt in range(retries_per_model):
+        attempt = 0
+        rate_limited = 0
+        while attempt < retries_per_model:
+            attempt += 1
             try:
                 return call_fn(model)
             except requests.HTTPError as e:
@@ -69,9 +86,16 @@ def call_with_model_fallback(call_fn, models, retries_per_model=5):
                 if code in SKIPPABLE_STATUS_CODES:
                     last_quota_error = e
                     break
+                if code == 429 and rate_limited < len(RATE_LIMIT_DELAYS_SECONDS):
+                    last_network_error = e
+                    delay = _retry_after_seconds(e) or RATE_LIMIT_DELAYS_SECONDS[rate_limited]
+                    rate_limited += 1
+                    attempt -= 1  # ожидание лимита — не попытка модели
+                    time.sleep(delay)
+                    continue
                 if code in TRANSIENT_STATUS_CODES:
                     last_network_error = e
-                    if attempt < retries_per_model - 1:
+                    if attempt < retries_per_model:
                         time.sleep(NETWORK_RETRY_DELAY_SECONDS)
                     continue
                 raise
@@ -80,7 +104,7 @@ def call_with_model_fallback(call_fn, models, retries_per_model=5):
                 continue
             except TRANSIENT_NETWORK_ERRORS as e:
                 last_network_error = e
-                if attempt < retries_per_model - 1:
+                if attempt < retries_per_model:
                     time.sleep(NETWORK_RETRY_DELAY_SECONDS)
                 continue
     raise last_content_error or last_network_error or last_quota_error
