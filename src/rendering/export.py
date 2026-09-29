@@ -21,7 +21,8 @@ import os
 from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
-from rendering.render import convert_to_pdf, render_pptx_to_pngs, substituted_typefaces
+from rendering.render import (convert_to_pdf, fallback_typeface, render_pptx_to_pngs,
+                              substituted_typefaces)
 
 
 def _shape_lines(shape):
@@ -94,7 +95,7 @@ _PAGE = """<!doctype html>
 """
 
 
-def build_html(pptx_path, png_paths, out_html, title=None, substituted=()):
+def build_html(pptx_path, png_paths, out_html, title=None, substituted=(), fallback="Arial"):
     """Собирает самодостаточный HTML из уже отрендеренных PNG (без LibreOffice)."""
     texts = slide_texts(pptx_path)
     # Название — с титульного слайда: имя файла («compact», «a1b2c3d4») читателю
@@ -112,7 +113,7 @@ def build_html(pptx_path, png_paths, out_html, title=None, substituted=()):
             f'<section id="slide-{i + 1}"><img src="data:image/png;base64,{data}" alt="{alt}">'
             f'<div class="text"><div class="num">Слайд {i + 1}</div>{body}</div></section>')
     fonts = (f" Шрифтов шаблона нет на сервере рендера, в картинках они заменены на "
-             f"Arial: {html.escape(', '.join(substituted))}; в .pptx — оригинальные."
+             f"{html.escape(fallback)}: {html.escape(', '.join(substituted))}; в .pptx — оригинальные."
              if substituted else "")
     page = _PAGE.format(title=html.escape(title), count=len(png_paths),
                         fonts=fonts, sections="\n".join(sections))
@@ -131,6 +132,8 @@ def export_all(pptx_path, out_dir, png_paths=None, title=None):
     if not os.path.exists(pdf_path):
         convert_to_pdf(pptx_path, out_dir)
     substituted = substituted_typefaces(pptx_path)
+    fallback = fallback_typeface()
     html_path = build_html(pptx_path, png_paths, os.path.join(out_dir, f"{name}.html"),
-                           title=title, substituted=substituted)
-    return {"pdf": pdf_path, "html": html_path, "substituted_fonts": substituted}
+                           title=title, substituted=substituted, fallback=fallback)
+    return {"pdf": pdf_path, "html": html_path, "substituted_fonts": substituted,
+            "fallback_font": fallback}

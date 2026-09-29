@@ -8,7 +8,7 @@ import zipfile
 from conftest import SURVEY_31, requires
 
 from rendering.render import (
-    FALLBACK_TYPEFACE,
+    fallback_typeface,
     _installed_families,
     _prepare_render_copy,
     _referenced_typefaces,
@@ -30,7 +30,7 @@ def test_missing_families_rewritten_in_copy(tmp_path):
     with zipfile.ZipFile(copy_path) as z:
         blob = b"".join(z.read(n) for n in z.namelist() if n.endswith(".xml"))
     assert b'typeface="Aeroport"' not in blob
-    assert b'typeface="%s"' % FALLBACK_TYPEFACE.encode() in blob
+    assert b'typeface="%s"' % fallback_typeface().encode() in blob
 
     # Source untouched.
     with zipfile.ZipFile(SURVEY_31) as z:

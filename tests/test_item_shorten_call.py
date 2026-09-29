@@ -34,7 +34,8 @@ class Scripted:
 
 
 def _bullets(client):
-    block = generate_block(client, "bullet_list", "устройство программы", "бриф", count=5,
+    block = generate_block(client, "bullet_list", "устройство программы",
+                           "бриф: программа 3 месяца, встречи 3 часа в неделю", count=5,
                            models=["m"], item_chars=28)
     return [b.replace("\xa0", " ") for b in block["bullets"]]
 

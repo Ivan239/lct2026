@@ -146,6 +146,56 @@ def extract_numbers(text):
     return out
 
 
+# Голое число до 10 — порядковое («3 этапа», «шаг 2»), а не утверждение о факте.
+_BARE_ORDINAL_MAX = 10
+_NUMBER_PARTS = re.compile(r"([+\-]?)(\d+(?:\.\d+)?)(.*)")
+
+
+def number_value(token):
+    """(value, is_claim) токена из extract_numbers. Сравниваем ЗНАЧЕНИЯ:
+    «+25 %» в брифе и «25%» на слайде — одно и то же утверждение."""
+    match = _NUMBER_PARTS.fullmatch(token)
+    if not match:
+        return None, False
+    sign, digits, unit = match.groups()
+    value = float(digits)
+    claim = bool(sign or unit or "." in digits or value > _BARE_ORDINAL_MAX)
+    return value, claim
+
+
+def sourced_values(numbers):
+    """Значения, за которые отвечает источник: сами числа и то, что честно
+    СЧИТАЕТСЯ из пары чисел ОДНОЙ единицы — изменение в процентах, разница,
+    отношение. «Время поиска снизилось на 67%» из 94 сек → 31 сек — вывод;
+    «этап 2 — раскатка на 50%» — выдумка.
+
+    Только одной единицы: пересчёт ВСЕХ пар (включая голые ячейки таблицы)
+    на реальном пакете (32 числа) разрешал 159 целых из 1..200 — в том числе
+    те самые выдуманные 10% и 50%, проверка слепла."""
+    import math
+
+    base, by_unit = set(), {}
+    for token in numbers:
+        value, _ = number_value(token)
+        if value is None:
+            continue
+        base.add(value)
+        unit = _NUMBER_PARTS.fullmatch(token).group(3).strip().lower()
+        if unit:
+            by_unit.setdefault(unit, set()).add(value)
+    allowed = set(base)
+    for values in by_unit.values():
+        for a in values:
+            for b in values:
+                if a == b or a == 0:
+                    continue
+                change = abs(a - b) / a * 100
+                allowed.update({round(change), math.floor(change), math.ceil(change)})
+                allowed.update({round(abs(a - b), 1), round(abs(a - b))})
+                allowed.update({round(b / a, 1), round(b / a)})
+    return allowed
+
+
 def to_brief_text(package):
     """One brief string for the current text pipeline (two_phase takes a
     string). Keeps the parts labelled so the model can tell the author's

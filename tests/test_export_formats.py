@@ -5,6 +5,7 @@
 экранирован, а подмена шрифтов не прячется."""
 
 import base64
+import os
 
 from pptx import Presentation
 from pptx.util import Inches
@@ -62,3 +63,49 @@ def test_font_substitution_is_named_not_hidden(tmp_path):
     assert "VK Sans" in page and "Arial" in page
     clean = open(build_html(path, pngs, str(tmp_path / "b.html")), encoding="utf-8").read()
     assert "заменены" not in clean
+
+
+def test_the_fallback_font_is_one_the_host_has(monkeypatch):
+    """В Linux-образе Arial нет: подставить в копию отсутствующий шрифт — снова
+    отдать выбор LibreOffice, а сообщение «заменены на Arial» было бы неправдой."""
+    from rendering import render
+
+    monkeypatch.setattr(render, "_installed_families",
+                        lambda: {"liberation sans", "dejavu sans"})
+    assert render.fallback_typeface() == "Liberation Sans"
+    monkeypatch.setattr(render, "_installed_families", lambda: {"arial", "liberation sans"})
+    assert render.fallback_typeface() == "Arial"
+
+
+def test_the_html_names_the_real_fallback(tmp_path):
+    path, pngs = _deck(tmp_path)
+    page = open(build_html(path, pngs, str(tmp_path / "c.html"), substituted=["Play"],
+                           fallback="Liberation Sans"), encoding="utf-8").read()
+    assert "заменены на Liberation Sans" in page
+
+
+def test_fonts_in_nested_directories_are_seen(tmp_path, monkeypatch):
+    """Linux кладёт шрифты по подкаталогам (/usr/share/fonts/truetype/…): плоский
+    скан видел там ноль семейств, и в образе сдачи подменялся КАЖДЫЙ шрифт."""
+    import glob
+    import shutil
+
+    import pytest
+
+    from rendering import render
+
+    candidates = [p for d in ("/System/Library/Fonts/Supplemental", "/Library/Fonts",
+                              "/usr/share/fonts")
+                  for p in glob.glob(os.path.join(d, "**", "*.ttf"), recursive=True)]
+    if not candidates:
+        pytest.skip("на хосте нет ни одного .ttf")
+    nested = tmp_path / "truetype" / "family"
+    nested.mkdir(parents=True)
+    shutil.copy(candidates[0], nested / os.path.basename(candidates[0]))
+
+    monkeypatch.setattr(render, "FONT_DIRS", [str(tmp_path)])
+    render._installed_families.cache_clear()
+    try:
+        assert render._installed_families(), "шрифт во вложенном каталоге не найден"
+    finally:
+        render._installed_families.cache_clear()

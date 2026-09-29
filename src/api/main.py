@@ -639,7 +639,8 @@ def _generate_deck(template_id, brief, model=None, source_numbers=None, slides=N
         exported = export_all(out_pptx, GENERATED_DIR, png_paths=slide_png_paths)
         exports = {"pdf_url": f"/static/generated/{generation_id}.pdf",
                    "html_url": f"/static/generated/{generation_id}.html",
-                   "substituted_fonts": exported["substituted_fonts"]}
+                   "substituted_fonts": exported["substituted_fonts"],
+                   "fallback_font": exported["fallback_font"]}
     except Exception as e:  # noqa: BLE001
         print(f"! экспорт .pdf/.html не собран: {e}", flush=True)
 

@@ -511,19 +511,11 @@ def placeholder_hits(slide):
 # A bare integer up to this value, with no sign and no unit, is an ordinal or
 # an enumerator («01», «шаг 3»), not a claim; with a unit or a sign («3 дня»,
 # «+5») it is a claim and is checked.
-_BARE_ORDINAL_MAX = 10
-_NUMBER_PARTS = re.compile(r"([+\-]?)(\d+(?:\.\d+)?)(.*)")
-
-
 def _number_value(token):
-    """(value, is_claim) of a token from content_package.extract_numbers."""
-    match = _NUMBER_PARTS.fullmatch(token)
-    if not match:
-        return None, False
-    sign, digits, unit = match.groups()
-    value = float(digits)
-    claim = bool(sign or unit or "." in digits or value > _BARE_ORDINAL_MAX)
-    return value, claim
+    """(value, is_claim) — одно правило с генерацией (content_package.number_value)."""
+    from content_package import number_value
+
+    return number_value(token)
 
 
 def _slide_fact_texts(slide):
@@ -558,9 +550,11 @@ def unsourced_numbers(pptx_path, source_numbers):
     «+25 %» in the brief and «25%» on a slide are the same claim, and a sign or
     a unit is how the model rephrases, not what it invents. Returns
     [(slide_no, token)], each token once per slide."""
-    from content_package import extract_numbers
+    from content_package import extract_numbers, sourced_values
 
-    known = {v for v, _ in map(_number_value, source_numbers) if v is not None}
+    # То же правило, что у генерации (two_phase._reject_invented_numbers):
+    # «снизилось на 67%» из 94 сек → 31 сек — вывод из источника, не выдумка.
+    known = sourced_values(source_numbers)
     found = []
     for number, slide in enumerate(Presentation(pptx_path).slides, 1):
         seen = set()

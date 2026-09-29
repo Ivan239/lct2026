@@ -16,6 +16,7 @@ import json
 import re
 
 from common.json_utils import extract_json
+from content_package import extract_numbers, number_value, sourced_values
 from common.phrases import (DANGLING_TAIL_WORDS, cut_at_clause, cut_at_clause_chars,
                             drop_dangling_function_words,
                             unfilled_placeholders)
@@ -530,6 +531,46 @@ def _reject_duplicate_stats(block, role, used_nums, used_labels):
         raise ValueError(f"stats repeat what another slide already shows: {sorted(clash)}")
 
 
+NUMBERS_NOTE = load_prompt("numbers_only_from_brief.v1.txt")
+
+
+def _block_strings(value):
+    """Весь текст блока, который попадёт на слайд: заголовок, пункты, пары
+    показателей, колонки, подпись к картинке."""
+    if isinstance(value, str):
+        yield value
+    elif isinstance(value, dict):
+        for key, item in value.items():
+            if key != "type":
+                yield from _block_strings(item)
+    elif isinstance(value, (list, tuple)):
+        for item in value:
+            yield from _block_strings(item)
+
+
+def invented_numbers(block, allowed):
+    """Числа-утверждения блока, за которые источник не отвечает."""
+    found = []
+    for text in _block_strings(block):
+        for token in extract_numbers(text):
+            value, claim = number_value(token)
+            if value is not None and claim and value not in allowed and token not in found:
+                found.append(token)
+    return found
+
+
+def _reject_invented_numbers(block, allowed):
+    """Raise (-> retry), если модель вписала число, которого нет в брифе.
+    Проверка «все цифры есть в исходных материалах» (Приложение 1) раньше
+    только ПОМЕЧАЛА такие числа в аудите — и девять колод сдачи ушли с
+    «этап 2 — раскатка на 50%», «2000 пользователей в неделю», «+175%»:
+    выдуманные этапы и доли на слайдах, которые читает заказчик. Просьба в
+    промпте не держит (правило проекта), держит отбраковка с повтором."""
+    found = invented_numbers(block, allowed)
+    if found:
+        raise ValueError(f"numbers not in the brief: {found}")
+
+
 def generate_block(client, role, theme, brief, count=None, models=TEXT_MODELS,
                    style_preamble="", used_stats=None, item_chars=None):
     """One block, one call, one requirement (the exact count) — sized for the
@@ -553,6 +594,8 @@ def generate_block(client, role, theme, brief, count=None, models=TEXT_MODELS,
         .replace("__COUNT__", str(count or 3))
         .replace("__MAXCHARS__", str(max_chars))
     )
+    prompt += NUMBERS_NOTE
+    allowed_numbers = sourced_values(extract_numbers(brief))
     if role == "stats_kpi" and (used_nums or used_labels):
         prompt += (
             "\n\nЭТИ цифры и метрики УЖЕ показаны на другом слайде — возьми ДРУГИЕ "
@@ -569,6 +612,7 @@ def generate_block(client, role, theme, brief, count=None, models=TEXT_MODELS,
             if enforce_unique:
                 _reject_wordy_figures(block, role)
                 _reject_duplicate_stats(block, role, used_nums, used_labels)
+                _reject_invented_numbers(block, allowed_numbers)
             return block
         return call
 

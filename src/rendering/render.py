@@ -22,7 +22,10 @@ FONT_DIRS = [
     os.path.expanduser("~/Library/Fonts"),
     "/usr/share/fonts",
 ]
-FALLBACK_TYPEFACE = "Arial"
+# Первый установленный из списка. Arial есть на macOS/Windows, но не в Linux-образе
+# сдачи: подставить в копию шрифт, которого тоже нет, — снова отдать выбор
+# LibreOffice. Liberation Sans метрически совместим с Arial (та же ширина строк).
+FALLBACK_CANDIDATES = ("Arial", "Liberation Sans", "DejaVu Sans")
 
 _TYPEFACE_RE = re.compile(rb'typeface="([^"]+)"')
 
@@ -49,7 +52,13 @@ def _installed_families():
 
     families = set()
     for font_dir in FONT_DIRS:
-        for path in glob.glob(os.path.join(font_dir, "*")):
+        # Рекурсивно: в Linux шрифты лежат по подкаталогам
+        # (/usr/share/fonts/truetype/liberation/…), и плоский glob видел там
+        # НОЛЬ семейств — каждый шрифт, даже установленный, «подменялся» на
+        # отсутствующий Arial, и выбор снова уходил LibreOffice.
+        for path in glob.glob(os.path.join(font_dir, "**", "*"), recursive=True):
+            if os.path.isdir(path):
+                continue
             try:
                 if path.lower().endswith(".ttc"):
                     fonts = TTCollection(path, lazy=True).fonts
@@ -63,6 +72,14 @@ def _installed_families():
             except Exception:
                 continue  # not a parseable font — irrelevant
     return families
+
+
+def fallback_typeface():
+    installed = _installed_families()
+    for family in FALLBACK_CANDIDATES:
+        if _normalize(family) in installed:
+            return family
+    return FALLBACK_CANDIDATES[0]
 
 
 def _referenced_typefaces(pptx_path):
@@ -81,12 +98,13 @@ def _referenced_typefaces(pptx_path):
 def _prepare_render_copy(pptx_path, tmp_dir):
     """Returns a path to render from: the original file when every referenced
     font is installed, otherwise a copy (same basename, so downstream PDF/PNG
-    naming is unchanged) with missing families rewritten to FALLBACK_TYPEFACE.
+    naming is unchanged) with missing families rewritten to fallback_typeface().
     Preview-only — the original file is never modified."""
     missing = {f for f in _referenced_typefaces(pptx_path) if _normalize(f) not in _installed_families()}
     if not missing:
         return pptx_path
 
+    fallback = fallback_typeface().encode("utf-8")
     copy_path = os.path.join(tmp_dir, os.path.basename(pptx_path))
     with zipfile.ZipFile(pptx_path) as zin, zipfile.ZipFile(copy_path, "w", zipfile.ZIP_DEFLATED) as zout:
         for item in zin.infolist():
@@ -95,7 +113,7 @@ def _prepare_render_copy(pptx_path, tmp_dir):
                 for face in missing:
                     data = data.replace(
                         b'typeface="%s"' % face.encode("utf-8"),
-                        b'typeface="%s"' % FALLBACK_TYPEFACE.encode("utf-8"),
+                        b'typeface="%s"' % fallback,
                     )
             zout.writestr(item, data)
     return copy_path
@@ -131,7 +149,7 @@ _SCRIPT_FONT_RE = re.compile(rb'<a:font script="[^"]*" typeface="[^"]*"\s*/>')
 
 def substituted_typefaces(pptx_path):
     """Семейства, которых нет на этом хосте и которые в PDF/PNG заменены на
-    FALLBACK_TYPEFACE. Пусто — рендер честный, как в PowerPoint."""
+    fallback_typeface(). Пусто — рендер честный, как в PowerPoint."""
     faces = set()
     with zipfile.ZipFile(pptx_path) as z:
         for name in z.namelist():

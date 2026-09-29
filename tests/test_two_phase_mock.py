@@ -284,7 +284,8 @@ def test_a_surplus_of_stats_is_cut_not_retried():
     reply = json.dumps({"title": "Итоги пилота",
                         "stats": [["94 с", "до пилота"], ["31 с", "после"], ["72%", "каждый день"]]})
     client = FakeClient([reply])
-    block = generate_block(client, "stats_kpi", "итоги", "бриф", count=1, models=["GigaChat"])
+    block = generate_block(client, "stats_kpi", "итоги", "бриф: 94 с до пилота, 31 с после, 72% каждый день",
+                           count=1, models=["GigaChat"])
     assert client.calls == 1
     assert block["stats"] == [["94 с", "до пилота"]]
 
