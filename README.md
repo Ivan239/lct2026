@@ -148,7 +148,7 @@ set -a; . ./.env; set +a
 ## Тесты
 
 ```bash
-.venv/bin/python3 -m pytest tests/ -q     # 410 тестов, без LLM и без LibreOffice
+.venv/bin/python3 -m pytest tests/ -q     # 435 тестов, без LLM и без LibreOffice
 ```
 
 Тесты покрывают разбор шаблонов, спеку слотов, вёрстку, QA-проходы и

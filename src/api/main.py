@@ -78,9 +78,25 @@ def _make_client():
         client_, model_ = configured
         print(f"[api] генератор: {model_} через {os.environ.get('LLM_BASE_URL')}", flush=True)
         return client_, model_
-    print("[api] LLM_BASE_URL не задан — используется запасной провайдер разработки",
-          flush=True)
-    return GigaChatClient(verify_ssl=False), None
+    if os.environ.get("GIGACHAT_CLIENT_ID") and os.environ.get("GIGACHAT_CLIENT_SECRET"):
+        print("[api] LLM_BASE_URL не задан — используется запасной провайдер разработки",
+              flush=True)
+        return GigaChatClient(verify_ssl=False), None
+    # Без модели сервис всё равно стартует (список шаблонов, превью, скачивания
+    # работают), а операции, которым нужна модель, отвечают понятной 503.
+    # Раньше импорт падал с KeyError: 'GIGACHAT_CLIENT_ID' — на свежем клоне
+    # без .env не поднимался ни сервис, ни тесты API.
+    print(f"[api] {MODEL_NOT_CONFIGURED}", flush=True)
+    return None, None
+
+
+MODEL_NOT_CONFIGURED = ("Модель не настроена: задайте LLM_BASE_URL, LLM_MODEL и LLM_API_KEY "
+                        "в .env (образец — .env.example)")
+
+
+def _require_model():
+    if client is None:
+        raise HTTPException(status_code=503, detail=MODEL_NOT_CONFIGURED)
 
 
 client, DEFAULT_MODEL = _make_client()
@@ -339,6 +355,7 @@ def delete_template(template_id: str):
 
 @app.post("/api/templates")
 def upload_template(file: UploadFile = File(...), model: str | None = Form(None)):
+    _require_model()
     # Deliberately sync (runs in FastAPI's threadpool): template processing is
     # minutes of blocking CPU/LLM work, and as an `async def` it froze the
     # whole event loop — /api/progress (and every other request) couldn't get
@@ -548,6 +565,7 @@ def get_progress():
 
 @app.post("/api/generate")
 def generate_presentation(req: GenerateRequest):
+    _require_model()
     return _generate_deck(req.template_id, req.brief, req.model, slides=req.slides)
 
 
@@ -562,6 +580,7 @@ def generate_from_package(template_id: str = Form(...), file: UploadFile = File(
     numbers become the reference for the check «все цифры со слайдов есть в
     исходных материалах» in the response's warnings. A broken package is a 422
     that names the problem, not a 500 three layers down."""
+    _require_model()
     if template_id not in _template_registry:
         raise HTTPException(status_code=404, detail="Шаблон не найден")
     workdir = tempfile.mkdtemp(prefix="package_upload_")
@@ -736,6 +755,7 @@ def fix_selected(generation_id: str, req: FixRequest):
     никаких чисел сверх источника, без повторов показателей других слайдов),
     колода пересобирается и проходит аудит заново. Остальные слайды не
     трогаются — их текст дословно тот же."""
+    _require_model()
     if not all(c.isalnum() for c in generation_id):
         raise HTTPException(status_code=400, detail="Неверный идентификатор")
     try:

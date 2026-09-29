@@ -10,3 +10,4 @@ python-multipart
 fonttools
 defusedxml
 xmlschema
+pytest
