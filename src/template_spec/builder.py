@@ -12,7 +12,7 @@ changing consumers."""
 
 from pptx import Presentation
 
-from common.pictures import has_data_object
+from common.pictures import demo_picture_placeholders, has_data_object
 from fonts.metrics import FontResolver
 from generator.generator import get_capacity, get_item_char_budget
 from generator.slide_kit import content_text_shapes
@@ -76,6 +76,13 @@ def build_spec(template_path, archetype_map, style_profile=None):
         # Here, not at parse time: build_spec runs on every generation, so the
         # rule reaches templates whose classification is already cached.
         if has_data_object(prs.slides[idx]):
+            continue
+        # Дизайн слайда построен вокруг картинки в слоте (скриншот в мокапе
+        # телефона у VK Education), а картинки у нас нет: демо-изображение
+        # шаблона честно снимается, и под наш список выходил пустой телефон с
+        # надписью «ИЗОБРАЖЕНИЕ» — по одному на каждую колоду сдачи. Роль
+        # берёт другой слайд семьи или синтезируется.
+        if demo_picture_placeholders(prs.slides[idx]):
             continue
         entry = {"idx": idx, "capacity": None, "bg": backgrounds.get(idx)}
         if role in COUNTED_ROLES:

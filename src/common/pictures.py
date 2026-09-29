@@ -281,3 +281,35 @@ def has_connector_diagram(slide):
     lines = _connector_lines(slide)
     return (len(lines) >= DIAGRAM_MIN_CONNECTORS
             and sum(1 for s in lines if _is_arrowed(s)) >= DIAGRAM_MIN_ARROWS)
+
+
+# Меньше — логотип или QR-код в слоте, а не демо-картинка.
+DEMO_PLACEHOLDER_MIN_AREA_FRACTION = 0.03
+
+
+def demo_picture_placeholders(slide):
+    """Слоты-картинки (плейсхолдеры PICTURE/OBJECT), в которых ещё лежит
+    изображение шаблона: скриншот в мокапе телефона, фото в рамке."""
+    from pptx.enum.shapes import PP_PLACEHOLDER
+    from pptx.oxml.ns import qn
+
+    presentation = slide.part.package.presentation_part.presentation
+    area = (presentation.slide_width or 0) * (presentation.slide_height or 0)
+    if not area:
+        return []
+    found = []
+    for shape in slide.shapes:
+        if not shape.is_placeholder or not shape.width or not shape.height:
+            continue
+        try:
+            kind = shape.placeholder_format.type
+        except (AttributeError, ValueError):
+            continue
+        if kind not in (PP_PLACEHOLDER.PICTURE, PP_PLACEHOLDER.OBJECT):
+            continue
+        if shape._element.find(".//" + qn("a:blip")) is None:
+            continue
+        if shape.width * shape.height / area < DEMO_PLACEHOLDER_MIN_AREA_FRACTION:
+            continue
+        found.append(shape)
+    return found

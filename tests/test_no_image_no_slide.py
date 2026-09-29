@@ -26,3 +26,30 @@ def test_without_images_the_image_slide_is_dropped_and_not_inserted():
 def test_with_images_the_old_rule_stands():
     assert _roles(OUTLINE, images_available=True) == ["title", "bullet_list", "image_caption", "closing"]
     assert "image_caption" in _roles(OUTLINE[:2], images_available=True)
+
+
+def test_the_model_is_not_offered_an_image_slide_it_cannot_get():
+    """Видя роль в меню, модель ставила её в каждый план; код снимал — и
+    компактная колода выходила 8 слайдов при минимуме 10."""
+    import json
+
+    from content_parser.two_phase import generate_outline
+
+    spec = {"families": [{"id": "f0", "role": "bullet_list", "slides": [{"idx": 1, "capacity": 3}]},
+                         {"id": "f1", "role": "image_caption", "slides": [{"idx": 2, "capacity": None}]}],
+            "rotation": None}
+    prompts = []
+
+    class Client:
+        def chat(self, messages, model=None, **kwargs):
+            prompts.append(messages[-1]["content"])
+            blocks = ([{"role": "title", "theme": "т", "count": None}]
+                      + [{"role": "bullet_list", "theme": f"б{i}", "count": 3} for i in range(3)]
+                      + [{"role": "closing", "theme": "итог", "count": None}])
+            return {"choices": [{"message": {"content": json.dumps(blocks, ensure_ascii=False)}}]}
+
+    generate_outline(Client(), "бриф", spec, models=["m"], slides=5)
+    assert prompts and "image_caption" not in prompts[0]
+    prompts.clear()
+    generate_outline(Client(), "бриф", spec, models=["m"], slides=5, images_available=True)
+    assert "image_caption" in prompts[0]

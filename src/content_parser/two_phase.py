@@ -46,7 +46,10 @@ MAX_BLOCKS = DECK_MAX_SLIDES
 # generator to an open-weights model (item 1) means swapping text files, not
 # code. The loaded text is byte-for-byte the text that used to be inline
 # (test_prompt_files checks the files and placeholders).
-OUTLINE_PROMPT = load_prompt("outline.v1.txt")
+OUTLINE_PROMPT = load_prompt("outline.v2.txt")
+# v2: просьба о слайде с картинкой вынесена в отдельный файл и подставляется,
+# только когда картинка есть (images_available).
+OUTLINE_IMAGE_RULE = load_prompt("outline_image_rule.v1.txt")
 
 BLOCK_PROMPTS = {
     role: load_prompt(f"block_{role}.v1.txt")
@@ -153,7 +156,12 @@ def generate_outline(client, brief, spec, models=TEXT_MODELS, style_preamble="",
     and the longer of the two is kept. Never a failure: a deck one slide short
     is better than no deck (iter113 lost a whole run to one malformed block)."""
     low, high = deck_size_bounds(slides)
-    menu = describe_for_prompt(spec, SYNTHESIZABLE_TYPES)
+    # Роль без картинки не предлагать вовсе: модель, видя её в меню, ставила
+    # слайд с картинкой в каждый план, код его снимал — и компактная колода
+    # выходила 8–9 слайдов при минимуме 10 (добор приносил тот же слайд снова).
+    offered = [r for r in SYNTHESIZABLE_TYPES if images_available or r != "image_caption"]
+    roles = [r for r in OUTLINE_ROLES if images_available or r != "image_caption"]
+    menu = describe_for_prompt(spec, offered)
     if style_preamble:
         # Template design brief (plan 9.4) — advice for tone/length; every
         # hard limit stays code-enforced below regardless of what it says.
@@ -161,9 +169,10 @@ def generate_outline(client, brief, spec, models=TEXT_MODELS, style_preamble="",
     prompt = (
         OUTLINE_PROMPT
         .replace("__MENU__", menu)
-        .replace("__ROLES__", ", ".join(OUTLINE_ROLES))
+        .replace("__ROLES__", ", ".join(roles))
         .replace("__RANGE__", f"РОВНО {low}" if low == high else f"{low}-{high}")
         .replace("__BRIEF__", brief)
+        .replace("__IMAGE_RULE__", OUTLINE_IMAGE_RULE if images_available else "")
     )
     # Вариант вёрстки меняет ПЛАН, а не вёрстку: добавка лежит отдельным файлом
     # промпта, по файлу на вариант (content_parser/variants.py).
@@ -229,9 +238,12 @@ def _ask_for_missing_blocks(client, outline, brief, menu, low, high, models,
     except Exception:  # noqa: BLE001 — best effort, the short outline stands
         return outline
     seen = {str(item.get("theme", "")).strip().lower() for item in outline}
+    # Без обрезки до `missing`: правила ниже снимают лишний разделитель и
+    # слайд без картинки, и срезанный заранее добор терял как раз нужные блоки.
+    # Длину держит max_blocks.
     fresh = [item for item in extra
              if str(item.get("theme", "")).strip().lower() not in seen
-             and (images_available or item.get("role") != "image_caption")][:missing]
+             and (images_available or item.get("role") != "image_caption")]
     if not fresh:
         return outline
     # The closing stays last: _enforce_outline_rules moves it there anyway, and

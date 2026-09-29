@@ -9,7 +9,7 @@ from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE
 from pptx.oxml.ns import qn
 from pptx.util import Emu, Inches, Length, Pt
 
-from common.pictures import (OVERSIZED_PICTURE_AREA_RATIO, _appears_on_other_slides,
+from common.pictures import (demo_picture_placeholders, OVERSIZED_PICTURE_AREA_RATIO, _appears_on_other_slides,
                              _covers_slide_text, is_stale_data_picture)
 from common.phrases import drop_dangling_function_words
 from common.synthesis import SYNTHESIZE
@@ -2096,30 +2096,9 @@ def _is_picture_group(shape):
 # 30, the phone mockup of someone else's feed that shipped beside our bullets
 # fourteen decks running, and its closing's 1.18in logo, which the area floor
 # spares.
-DEMO_PLACEHOLDER_MIN_AREA_FRACTION = 0.03
-
-
 def _demo_picture_placeholders(slide):
     """Picture placeholders that still carry the template's own image."""
-    area = (_slide_width(slide) or 0) * (_slide_height(slide) or 0)
-    if not area:
-        return []
-    found = []
-    for shape in slide.shapes:
-        if not shape.is_placeholder or not shape.width or not shape.height:
-            continue
-        try:
-            kind = shape.placeholder_format.type
-        except (AttributeError, ValueError):
-            continue
-        if kind not in (PP_PLACEHOLDER.PICTURE, PP_PLACEHOLDER.OBJECT):
-            continue
-        if shape._element.find(".//" + qn("a:blip")) is None:
-            continue
-        if shape.width * shape.height / area < DEMO_PLACEHOLDER_MIN_AREA_FRACTION:
-            continue  # a logo or a QR code in a slot, not a demo image
-        found.append(shape)
-    return found
+    return demo_picture_placeholders(slide)
 
 
 def _replace_demo_placeholders(slide, style_run, claimed_ids):

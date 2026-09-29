@@ -15,7 +15,7 @@ from content_parser import two_phase as tp
 from design_system import extractor, style_card
 
 SUBSTITUTED = {
-    "outline": ("__MENU__", "__ROLES__", "__RANGE__", "__BRIEF__"),
+    "outline": ("__MENU__", "__ROLES__", "__RANGE__", "__BRIEF__", "__IMAGE_RULE__"),
     "title": ("__THEME__", "__BRIEF__"),
     "section_divider": ("__THEME__",),
     "image_caption": ("__THEME__", "__BRIEF__"),
@@ -27,7 +27,7 @@ SUBSTITUTED = {
 
 
 def test_outline_and_block_prompts_come_from_files():
-    assert tp.OUTLINE_PROMPT == load_prompt("outline.v1.txt")
+    assert tp.OUTLINE_PROMPT == load_prompt("outline.v2.txt")
     assert set(tp.BLOCK_PROMPTS) == set(tp.OUTLINE_ROLES)
     for role, text in tp.BLOCK_PROMPTS.items():
         assert text == load_prompt(f"block_{role}.v1.txt"), role
