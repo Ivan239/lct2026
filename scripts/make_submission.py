@@ -29,7 +29,7 @@ from content_parser.variants import VARIANTS, variant_slides  # noqa: E402
 from evaluation.loop import ensure_template, generate_deck  # noqa: E402
 from llm_clients.backends import open_weights_client  # noqa: E402
 from rendering.export import build_html  # noqa: E402
-from rendering.render import render_pptx_to_pngs, substituted_typefaces  # noqa: E402
+from rendering.render import fallback_typeface, render_pptx_to_pngs, substituted_typefaces  # noqa: E402
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TEMPLATES = os.path.join(ROOT, "output", "templates")
@@ -64,7 +64,7 @@ def export_deck(out_pptx):
         pngs = render_pptx_to_pngs(out_pptx, tmp)
         shutil.copy(os.path.join(tmp, f"{name}.pdf"), os.path.join(out_dir, f"{name}.pdf"))
         build_html(out_pptx, pngs, os.path.join(out_dir, f"{name}.html"),
-                   substituted=substituted_typefaces(out_pptx))
+                   substituted=substituted_typefaces(out_pptx), fallback=fallback_typeface())
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -89,6 +89,38 @@ def build(template, variant, client, model, brief, slides):
             "seconds": seconds, "path": os.path.relpath(out_pptx, ROOT)}
 
 
+def write_report(rows, failed, model):
+    """README колод сдачи — по манифесту."""
+    lines = ["# Девять презентаций: 3 варианта × 3 шаблона", "",
+             f"Один и тот же контент — пакет «{os.path.basename(PACKAGE)}», "
+             f"модель — `{model}` (открытые веса; провайдер и настройки — "
+             "`docs/MODELS.md` в репозитории).", "",
+             "## Ось различий", ""]
+    for name, spec in VARIANTS.items():
+        lines.append(f"- **{spec['title']}** (`{name}`) — {spec['description']}.")
+    lines += ["", "Каждая колода лежит в трёх форматах: `.pptx` (редактируемый, основной),",
+              "`.pdf` и `.html` (для просмотра)."]
+    lines += ["", "Различается только ПЛАН колоды: состав слайдов, их число и порядок.",
+              "Вёрстка у всех трёх одна и та же, поэтому ни один вариант не соблюдает",
+              "правила шаблона хуже другого.", "", "## Собранные колоды", "",
+              "| Шаблон | Вариант | Слайдов | Время сборки | Чисел не из источника |",
+              "|---|---|---|---|---|"]
+    from evaluation.deterministic import unsourced_numbers
+    source = load_package(PACKAGE)["numbers"]
+    for r in rows:
+        invented = unsourced_numbers(os.path.join(ROOT, r["path"]), source)
+        lines.append(f"| {TEMPLATE_TITLES[r['template']]} | {VARIANTS[r['variant']]['title']} "
+                     f"| {r['slides']} | {r['seconds']} с | {len(invented)} |")
+    lines += ["", "«Чисел не из источника» — проверка аудита `dop_numbers_sourced`: число на",
+              "слайде, которого нет в пакете и которое не считается из пары его чисел одной",
+              "единицы (94 сек → 31 сек даёт «−67%»)."]
+    if failed:
+        lines += ["", "Не собрались: " + ", ".join(f"{f['template']}/{f['variant']}" for f in failed)]
+    with open(os.path.join(OUT, "README.md"), "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--template", action="append", choices=list(TEMPLATE_TITLES))
@@ -96,9 +128,18 @@ def main():
     ap.add_argument("--model", default=None, help="имя модели у провайдера")
     ap.add_argument("--slides", type=int, default=None,
                     help="заказать длину явно; по умолчанию её выбирает вариант")
+    ap.add_argument("--report-only", action="store_true",
+                    help="без модели: пересобрать README сдачи по manifest.json")
     ap.add_argument("--export-only", action="store_true",
                     help="без модели: досоздать .pdf/.html для уже собранных .pptx")
     args = ap.parse_args()
+
+    if args.report_only:
+        with open(os.path.join(OUT, "manifest.json"), encoding="utf-8") as f:
+            manifest = json.load(f)
+        write_report(manifest["decks"], manifest.get("failed", []), manifest["model"])
+        print("README сдачи пересобран по manifest.json")
+        return 0
 
     if args.export_only:
         for template in args.template or list(TEMPLATE_TITLES):
@@ -133,29 +174,29 @@ def main():
                 print(f"  ! {template}/{variant}: {e}", flush=True)
                 failed.append({"template": template, "variant": variant, "error": str(e)})
 
-    with open(os.path.join(OUT, "manifest.json"), "w", encoding="utf-8") as f:
+    # Перезапуск части колод (--template/--variant) ДОПОЛНЯЕТ манифест, а не
+    # затирает его: иначе README сдачи описывал бы одну последнюю колоду.
+    manifest_path = os.path.join(OUT, "manifest.json")
+    rebuilt = {(r["template"], r["variant"]) for r in rows} | {
+        (f["template"], f["variant"]) for f in failed}
+    try:
+        with open(manifest_path, encoding="utf-8") as f:
+            previous = json.load(f)
+        if previous.get("model") == model:
+            rows = [r for r in previous.get("decks", [])
+                    if (r["template"], r["variant"]) not in rebuilt] + rows
+            failed = [x for x in previous.get("failed", [])
+                      if (x["template"], x["variant"]) not in rebuilt] + failed
+    except (FileNotFoundError, ValueError):
+        pass
+    order = {(t, v): i for i, (t, v) in enumerate(
+        (t, v) for t in TEMPLATE_TITLES for v in VARIANTS)}
+    rows.sort(key=lambda r: order[(r["template"], r["variant"])])
+    with open(manifest_path, "w", encoding="utf-8") as f:
         json.dump({"model": model, "package": os.path.basename(PACKAGE),
                    "decks": rows, "failed": failed}, f, ensure_ascii=False, indent=2)
 
-    lines = ["# Девять презентаций: 3 варианта × 3 шаблона", "",
-             f"Один и тот же контент — пакет «{os.path.basename(PACKAGE)}», "
-             f"модель — {model}.", "",
-             "## Ось различий", ""]
-    for name, spec in VARIANTS.items():
-        lines.append(f"- **{spec['title']}** (`{name}`) — {spec['description']}.")
-    lines += ["", "Каждая колода лежит в трёх форматах: `.pptx` (редактируемый, основной),",
-              "`.pdf` и `.html` (для просмотра)."]
-    lines += ["", "Различается только ПЛАН колоды: состав слайдов, их число и порядок.",
-              "Вёрстка у всех трёх одна и та же, поэтому ни один вариант не соблюдает",
-              "правила шаблона хуже другого.", "", "## Собранные колоды", "",
-              "| Шаблон | Вариант | Слайдов | Время сборки |", "|---|---|---|---|"]
-    for r in rows:
-        lines.append(f"| {TEMPLATE_TITLES[r['template']]} | {VARIANTS[r['variant']]['title']} "
-                     f"| {r['slides']} | {r['seconds']} с |")
-    if failed:
-        lines += ["", "Не собрались: " + ", ".join(f"{f['template']}/{f['variant']}" for f in failed)]
-    with open(os.path.join(OUT, "README.md"), "w", encoding="utf-8") as f:
-        f.write("\n".join(lines) + "\n")
+    write_report(rows, failed, model)
 
     print(f"\nготово: {len(rows)} колод в {os.path.relpath(OUT, ROOT)}"
           + (f", не собралось {len(failed)}" if failed else ""))
