@@ -21,3 +21,16 @@ PRESET_B = os.path.join(TEMPLATES_DIR, "template_b_startup.pptx")
 
 def requires(path):
     return pytest.mark.skipif(not os.path.exists(path), reason=f"fixture deck missing: {path}")
+
+
+def pytest_runtest_setup(item):
+    """Параметр-шаблон, которого нет на диске, — пропуск, а не падение.
+
+    `requires(path)` вешается на тест руками, и параметризованные тесты
+    (`@pytest.mark.parametrize("template", [TJ_UNIVERSAL, TJ_MONO])`) его
+    не получали: на свежем клоне они падали с PackageNotFoundError, хотя их
+    соседи по файлу честно пропускались."""
+    params = getattr(getattr(item, "callspec", None), "params", {}) or {}
+    for value in params.values():
+        if isinstance(value, str) and value.endswith(".pptx") and not os.path.exists(value):
+            pytest.skip(f"fixture deck missing: {value}")
