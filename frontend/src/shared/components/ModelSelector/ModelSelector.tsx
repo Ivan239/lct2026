@@ -13,8 +13,14 @@ export function ModelSelector({ value, onChange, label }: ModelSelectorProps) {
 
   useEffect(() => {
     fetchModels()
-      .then((res) => setModels(res.models))
+      .then((res) => {
+        setModels(res.models)
+        // Выбор хранится в localStorage: модели, которой у провайдера уже нет
+        // (старый «GigaChat-2-Max» со времён разработки), в запрос не отправляем.
+        if (value && !res.models.includes(value)) onChange(null)
+      })
       .catch(() => setModels([]))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   return (

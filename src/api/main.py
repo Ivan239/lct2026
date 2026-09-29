@@ -105,6 +105,18 @@ client, DEFAULT_MODEL = _make_client()
 # Every call that does not name a model uses the configured open-weights one;
 # without it we fall back to the development chain.
 DEFAULT_MODELS = [DEFAULT_MODEL] if DEFAULT_MODEL else TEXT_MODELS
+
+
+def _models_for(requested):
+    """Модель из запроса — только если провайдер её знает. Браузер хранит
+    последний выбор в localStorage, и старый «GigaChat-2-Max» со времён
+    разработки уходил в Cloud.ru, где такой модели нет: 404 на план, потом на
+    запасной путь — и пользователь видел «не удалось разобрать бриф»."""
+    if requested and (not DEFAULT_MODEL or requested == DEFAULT_MODEL):
+        return [requested]
+    if requested:
+        print(f"[api] модель «{requested}» у провайдера нет — беру {DEFAULT_MODELS[0]}", flush=True)
+    return DEFAULT_MODELS
 app = FastAPI(title="SlideGen API")
 app.add_middleware(
     CORSMiddleware,
@@ -197,7 +209,7 @@ def _process_template(template_id, pptx_path, model=None):
     template_struct = extract_template(pptx_path)
     _set_progress("Рендерим слайды шаблона")
     png_paths = render_pptx_to_pngs(pptx_path, RENDERED_DIR)
-    text_models = [model] if model else DEFAULT_MODELS
+    text_models = _models_for(model)
     archetype_map = build_archetype_map(
         client, template_struct, rendered_png_paths=png_paths, text_models=text_models,
         fingerprint_cache=FingerprintCache(FINGERPRINT_CACHE_PATH),
@@ -309,7 +321,7 @@ def list_available_models():
 def get_balance():
     balance = _current_balance()
     if balance is None:
-        raise HTTPException(status_code=502, detail="Не удалось получить баланс GigaChat")
+        raise HTTPException(status_code=502, detail="Не удалось получить баланс у провайдера модели")
     return {"balance": balance}
 
 
@@ -491,7 +503,7 @@ def _plan_two_phase(template_id, brief, model=None, slides=None, variant=None):
     text sized to the chosen slide's real capacity. Returns (plan, skipped), or
     (None, None) to signal the caller to fall back to the legacy flow — the new
     path must never make the product less available than the old one was."""
-    models = [model] if model else DEFAULT_MODELS
+    models = _models_for(model)
     try:
         spec = _build_spec(template_id)
         # Template design brief (plan 9.4) — cached at upload, advisory only.
@@ -539,11 +551,11 @@ def _plan_two_phase(template_id, brief, model=None, slides=None, variant=None):
 def _plan_legacy(brief, archetype_map, template_path, model=None):
     """Pre-slot-spec flow: single-shot brief parsing, then post-hoc capacity
     resize. Kept as the fallback when any stage of the two-phase path fails."""
-    models = [model] if model else DEFAULT_MODELS
+    models = _models_for(model)
     try:
         content_blocks = parse_brief(client, brief, models=models)
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Не удалось разобрать бриф через GigaChat: {e}")
+        raise HTTPException(status_code=502, detail=f"Не удалось разобрать бриф: {e}")
 
     plan, skipped_blocks = match_content_to_slides(content_blocks, archetype_map)
 
@@ -828,7 +840,7 @@ def fix_selected(generation_id: str, req: FixRequest):
 
     plan = [(block, idx) for block, idx in session["plan"]]
     brief, model = session["brief"], session.get("model")
-    models = [model] if model else DEFAULT_MODELS
+    models = _models_for(model)
     template_id = session["template_id"]
     if template_id not in _template_registry:
         raise HTTPException(status_code=404, detail="Шаблон не найден")
