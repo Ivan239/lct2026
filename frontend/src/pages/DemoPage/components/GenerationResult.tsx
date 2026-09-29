@@ -1,10 +1,50 @@
+import { useState } from 'react'
 import type { GenerateResponse } from '@/shared/api/types'
-import { resolveUrl } from '@/shared/api/client'
+import { fixSelected, resolveUrl } from '@/shared/api/client'
 import { Button } from '@/shared/components/Button/Button'
 import { SlideGallery } from './SlideGallery'
 import styles from './GenerationResult.module.scss'
 
-export function GenerationResult({ result }: { result: GenerateResponse }) {
+const FIX_LABEL: Record<string, string> = {
+  numbers_not_in_source: 'переписать без цифр, которых нет в источнике',
+  sparse: 'переписать текст слайда',
+}
+
+export function GenerationResult({
+  result,
+  onFixed,
+}: {
+  result: GenerateResponse
+  onFixed: (fixed: GenerateResponse) => void
+}) {
+  const warnings = result.warnings ?? []
+  // По умолчанию отмечено всё найденное: пользователь снимает то, что считает
+  // нормой (например, выведенную им самим цифру).
+  const [chosen, setChosen] = useState<Set<number>>(() => new Set(warnings.map((w) => w.slide)))
+  const [fixing, setFixing] = useState(false)
+  const [fixError, setFixError] = useState<string | null>(null)
+
+  function toggle(slide: number) {
+    setChosen((prev) => {
+      const next = new Set(prev)
+      if (next.has(slide)) next.delete(slide)
+      else next.add(slide)
+      return next
+    })
+  }
+
+  async function handleFix() {
+    setFixing(true)
+    setFixError(null)
+    try {
+      onFixed(await fixSelected(result.generation_id, [...chosen]))
+    } catch (e) {
+      setFixError((e as Error).message)
+    } finally {
+      setFixing(false)
+    }
+  }
+
   return (
     <div className={styles.wrap}>
       <div className={styles.head}>
@@ -28,7 +68,7 @@ export function GenerationResult({ result }: { result: GenerateResponse }) {
 
       {(result.substituted_fonts?.length ?? 0) > 0 && (
         <p className={styles.packageLine}>
-          В превью, .pdf и .html шрифты {result.substituted_fonts!.join(', ')} заменены на Arial —
+          В превью, .pdf и .html шрифты {result.substituted_fonts!.join(', ')} заменены на {result.fallback_font ?? 'Arial'} —
           их нет на сервере рендера. В .pptx шрифты оригинальные.
         </p>
       )}
@@ -63,16 +103,44 @@ export function GenerationResult({ result }: { result: GenerateResponse }) {
         </div>
       )}
 
-      {(result.warnings?.length ?? 0) > 0 && (
+      {(result.fixed_slides?.length ?? 0) > 0 && (
+        <p className={styles.fixedLine}>
+          Исправлено слайдов: {result.fixed_slides!.join(', ')}. Колода пересобрана и проверена заново.
+        </p>
+      )}
+      {(result.not_fixed?.length ?? 0) > 0 && (
+        <p className={styles.packageLine}>
+          Не исправлено: {result.not_fixed!.map((x) => `слайд ${x.slide} — ${x.reason}`).join('; ')}
+        </p>
+      )}
+
+      {warnings.length > 0 && (
         <div className={styles.warnings}>
-          <strong>Стоит взглянуть:</strong>
-          <ul>
-            {result.warnings!.map((w, i) => (
+          <strong>Аудит нашёл — отметьте, что исправить:</strong>
+          <ul className={styles.findings}>
+            {warnings.map((w, i) => (
               <li key={i}>
-                Слайд {w.slide}: {w.details}
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={chosen.has(w.slide)}
+                    onChange={() => toggle(w.slide)}
+                    disabled={fixing}
+                  />
+                  <span>
+                    Слайд {w.slide}: {w.details}
+                    {FIX_LABEL[w.kind] && <em> → {FIX_LABEL[w.kind]}</em>}
+                  </span>
+                </label>
               </li>
             ))}
           </ul>
+          <div className={styles.fixRow}>
+            <Button onClick={handleFix} disabled={fixing || chosen.size === 0}>
+              {fixing ? 'Исправляем…' : `Исправить выбранные (${chosen.size})`}
+            </Button>
+            {fixError && <span className={styles.fixError}>{fixError}</span>}
+          </div>
         </div>
       )}
 

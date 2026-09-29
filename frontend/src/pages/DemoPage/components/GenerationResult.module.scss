@@ -99,3 +99,45 @@
   font-size: 14px;
   color: v.$color-text-muted;
 }
+
+.findings {
+  list-style: none;
+  padding-left: 0 !important;
+
+  li + li {
+    margin-top: v.$space-1;
+  }
+
+  label {
+    display: flex;
+    gap: v.$space-2;
+    align-items: flex-start;
+    cursor: pointer;
+  }
+
+  input {
+    margin-top: 3px;
+  }
+
+  em {
+    font-style: normal;
+    opacity: 0.8;
+  }
+}
+
+.fixRow {
+  display: flex;
+  align-items: center;
+  gap: v.$space-3;
+  margin-top: v.$space-3;
+}
+
+.fixError {
+  color: #b3261e;
+}
+
+.fixedLine {
+  margin: 0 0 v.$space-3;
+  font-size: 14px;
+  color: #1e7a3a;
+}

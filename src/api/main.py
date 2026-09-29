@@ -613,22 +613,35 @@ def _generate_deck(template_id, brief, model=None, source_numbers=None, slides=N
         if not plan:
             raise HTTPException(status_code=422, detail="Ни один блок контента не подошёл ни к одному слайду шаблона")
 
-        generation_id = uuid.uuid4().hex[:8]
-        out_pptx = os.path.join(GENERATED_DIR, f"{generation_id}.pptx")
-
-        try:
-            _set_progress("Собираем .pptx в стиле шаблона")
-            generate(template_path, plan, out_pptx,
-                     synth_canvas=_synth_canvas_hints(template_id, plan),
-                     canvas_backgrounds=_measured_backgrounds(template_id))
-            _set_progress("Рендерим превью слайдов")
-            slide_png_paths = render_pptx_to_pngs(out_pptx, GENERATED_DIR)
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=f"Не удалось собрать презентацию: {e}")
+        return _assemble_deck(template_id, plan, skipped, brief, model, source_numbers)
     finally:
         # Whatever path we exit through — success, quota error, fallback crash —
         # the progress slot must not stay stuck on a stale "active" stage.
         _set_progress("", active=False)
+
+
+def _session_path(generation_id):
+    return os.path.join(GENERATED_DIR, f"{generation_id}.session.json")
+
+
+def _assemble_deck(template_id, plan, skipped, brief, model, source_numbers):
+    """Готовый план → .pptx, превью, .pdf/.html, находки аудита. Общий путь для
+    генерации и для «исправить выбранные»: исправленная колода обязана пройти
+    те же проверки, что и первая."""
+    archetype_map = _load_archetypes(template_id)
+    template_path = os.path.join(TEMPLATES_DIR, f"{template_id}.pptx")
+    generation_id = uuid.uuid4().hex[:8]
+    out_pptx = os.path.join(GENERATED_DIR, f"{generation_id}.pptx")
+
+    try:
+        _set_progress("Собираем .pptx в стиле шаблона")
+        generate(template_path, plan, out_pptx,
+                 synth_canvas=_synth_canvas_hints(template_id, plan),
+                 canvas_backgrounds=_measured_backgrounds(template_id))
+        _set_progress("Рендерим превью слайдов")
+        slide_png_paths = render_pptx_to_pngs(out_pptx, GENERATED_DIR)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Не удалось собрать презентацию: {e}")
 
     slide_urls = [f"/static/generated/{os.path.basename(p)}" for p in slide_png_paths]
 
@@ -663,6 +676,17 @@ def _generate_deck(template_id, brief, model=None, source_numbers=None, slides=N
     except Exception:  # noqa: BLE001 — advisory, same as above
         pass
 
+    # Сессия — чтобы пользователь мог выбрать находки и исправить их, не
+    # перегенерируя всю колоду (ТЗ: «пользователь выбирает, какие исправить»).
+    try:
+        with open(_session_path(generation_id), "w", encoding="utf-8") as f:
+            json.dump({"template_id": template_id, "brief": brief, "model": model,
+                       "source_numbers": source_numbers,
+                       "plan": [[block, idx] for block, idx in plan], "skipped": skipped},
+                      f, ensure_ascii=False)
+    except Exception as e:  # noqa: BLE001 — без сессии не будет только исправления
+        print(f"! сессия генерации не сохранена: {e}", flush=True)
+
     return {
         "generation_id": generation_id,
         "download_url": f"/static/generated/{generation_id}.pptx",
@@ -680,3 +704,78 @@ def _generate_deck(template_id, brief, model=None, source_numbers=None, slides=N
         "warnings": warnings,
         "balance": _current_balance(),
     }
+
+
+def _block_count(block):
+    """Сколько пунктов/пар у блока — перегенерация держит ту же ёмкость слайда."""
+    for key in ("bullets", "stats", "left_points"):
+        if isinstance(block.get(key), list) and block[key]:
+            return len(block[key])
+    return None
+
+
+# Роли, текст которых пишет generate_block; у остальных (легаси-блоки) нечего
+# перезапросить — их находки остаются для ручной правки.
+_REGENERABLE = {"title", "section_divider", "bullet_list", "stats_kpi",
+                "two_column_comparison", "image_caption", "closing"}
+
+
+class FixRequest(BaseModel):
+    slides: list[int]
+
+
+@app.post("/api/generate/{generation_id}/fix")
+def fix_selected(generation_id: str, req: FixRequest):
+    """Исправить выбранные находки аудита: текст выбранных слайдов пишется
+    заново — с теми же ограничениями, что при генерации (ёмкость слайда,
+    никаких чисел сверх источника, без повторов показателей других слайдов),
+    колода пересобирается и проходит аудит заново. Остальные слайды не
+    трогаются — их текст дословно тот же."""
+    if not all(c.isalnum() for c in generation_id):
+        raise HTTPException(status_code=400, detail="Неверный идентификатор")
+    try:
+        with open(_session_path(generation_id), encoding="utf-8") as f:
+            session = json.load(f)
+    except FileNotFoundError:
+        raise HTTPException(status_code=404, detail="Генерация не найдена — соберите презентацию заново")
+
+    plan = [(block, idx) for block, idx in session["plan"]]
+    brief, model = session["brief"], session.get("model")
+    models = [model] if model else DEFAULT_MODELS
+    template_id = session["template_id"]
+    if template_id not in _template_registry:
+        raise HTTPException(status_code=404, detail="Шаблон не найден")
+    style_preamble = card_prompt_preamble(load_card(PARSED_DIR, template_id))
+    targets = sorted({n for n in req.slides if 1 <= n <= len(plan)})
+
+    not_fixed = []
+    try:
+        for i, number in enumerate(targets):
+            block, idx = plan[number - 1]
+            role = block.get("type")
+            if role not in _REGENERABLE:
+                not_fixed.append({"slide": number, "reason": "этот слайд собран без модели"})
+                continue
+            _set_progress(f"Переписываем слайд {number}", done=i, total=len(targets))
+            used_nums, used_labels = set(), set()
+            for other_pos, (other, _) in enumerate(plan):
+                if other_pos != number - 1:
+                    nums, labels = stat_fingerprints(other)
+                    used_nums |= nums
+                    used_labels |= labels
+            try:
+                fresh = generate_block(client, role, block.get("title") or "", brief,
+                                       count=_block_count(block), models=models,
+                                       style_preamble=style_preamble,
+                                       used_stats=(used_nums, used_labels))
+            except (ValueError, KeyError):
+                not_fixed.append({"slide": number, "reason": "модель не дала годного текста"})
+                continue
+            plan[number - 1] = (fresh, idx)
+        result = _assemble_deck(template_id, plan, session.get("skipped", []), brief, model,
+                                session.get("source_numbers"))
+    finally:
+        _set_progress("", active=False)
+    result["fixed_slides"] = [n for n in targets if n not in {x["slide"] for x in not_fixed}]
+    result["not_fixed"] = not_fixed
+    return result

@@ -164,7 +164,16 @@ export function DemoPage() {
 
         {error && <div className={styles.error}>{error}</div>}
 
-        {result && <GenerationResult result={result} />}
+        {result && (
+          <GenerationResult
+            key={result.generation_id}
+            result={result}
+            onFixed={(fixed) => {
+              setResult(fixed)
+              if (fixed.balance) setBalance(fixed.balance)
+            }}
+          />
+        )}
       </div>
     </Container>
   )

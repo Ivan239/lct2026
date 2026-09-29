@@ -78,3 +78,13 @@ export function generateFromPackage(
   if (model) form.append('model', model)
   return request('/api/generate/package', { method: 'POST', body: form })
 }
+
+/** Исправить выбранные находки аудита: текст этих слайдов пишется заново с
+ * теми же ограничениями, колода пересобирается и проходит аудит заново. */
+export function fixSelected(generationId: string, slides: number[]): Promise<GenerateResponse> {
+  return request(`/api/generate/${generationId}/fix`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ slides }),
+  })
+}

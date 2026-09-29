@@ -41,7 +41,7 @@ export function App() {
 
       <footer className={styles.footer}>
         <Container>
-          <p>СлайдоГен — учебный прототип. Генерация на GigaChat, российский LLM-стек.</p>
+          <p>СлайдоГен — прототип. Генерация на открытой модели Qwen3-32B (Apache 2.0), любой OpenAI-совместимый провайдер.</p>
         </Container>
       </footer>
     </>

@@ -57,10 +57,13 @@ export interface GenerateResponse {
   pdf_url?: string
   html_url?: string
   substituted_fonts?: string[]
+  fallback_font?: string
   slides: string[]
   plan: PlanItem[]
   skipped: SkippedItem[]
   warnings?: GenerationWarning[]
   balance?: BalanceEntry[] | null
   package?: PackageSummary
+  fixed_slides?: number[]
+  not_fixed?: { slide: number; reason: string }[]
 }

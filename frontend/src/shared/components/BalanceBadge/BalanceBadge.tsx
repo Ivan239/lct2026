@@ -10,7 +10,7 @@ export function BalanceBadge({ balance }: { balance: BalanceEntry[] | null | und
   if (!balance || balance.length === 0) return null
 
   return (
-    <div className={styles.wrap} title="Остаток токенов GigaChat по тарифам">
+    <div className={styles.wrap} title="Остаток токенов у провайдера модели">
       <span className={styles.dot} />
       {balance.map((entry) => (
         <span key={entry.model} className={styles.entry}>
