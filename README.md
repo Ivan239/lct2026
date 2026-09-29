@@ -58,6 +58,7 @@
 
 | Что | Ссылка |
 |---|---|
+| Рабочий сервис | https://45-132-177-203.sslip.io/demo |
 | Питч (PDF) | https://disk.yandex.ru/i/ZqCVVFH5NdgNXw |
 | Девять колод: 3 варианта × 3 шаблона, .pptx / .pdf / .html | https://github.com/Ivan239/lct2026/releases/tag/decks-v1 |
 | Документация | [ARCHITECTURE](docs/ARCHITECTURE.md) · [MODELS](docs/MODELS.md) · [AUDIT](docs/AUDIT.md) |
