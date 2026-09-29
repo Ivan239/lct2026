@@ -8,7 +8,7 @@ boxes (the clone path's normal first move) leaves them pointing at nothing.
 
 The native fill path has deleted surplus markers since iter18
 (_reposition_bullet_icons); the clone path never got the same pass — the same
-native/clone divergence CLAUDE.md records for the chrome blanking.
+native/clone divergence docs/LESSONS.md records for the chrome blanking.
 
 Both directions matter, so both are asserted here: the survey canvas loses its
 marker column, and a T-Zh canvas keeps its decor untouched.

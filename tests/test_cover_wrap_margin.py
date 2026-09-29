@@ -5,7 +5,7 @@ Seen on the render of the T-Zh study deck's closing: «Запустим пило
 title the estimate called one line, printed straight through the second one.
 
 Measured on that box: the line is 534.2pt against a 561.6pt budget — 95.1%, i.e.
-inside the 5% margin CLAUDE.md already declares unpredictable ("рендер переносит
+inside the 5% margin docs/LESSONS.md already declares unpredictable ("рендер переносит
 строки на ~2-4% раньше, чем предсказывают fontTools-метрики"). The project's
 answer elsewhere is the same constant, SINGLE_LINE_SAFETY; the cover path was
 still measuring against the full width.

@@ -4,7 +4,7 @@
 файл; правила меняются здесь, коммитом, а не в расписании.
 
 Ты судья, а не модель-генератор. Одна итерация = одна дека + одно изменение.
-Рабочая папка /Users/ivan239/llm_pres. Перед первым действием прочитай CLAUDE.md,
+Рабочая папка /Users/ivan239/llm_pres. Перед первым действием прочитай docs/LESSONS.md,
 `docs/TZ_VK.md` (ТЗ кейса) и `docs/TZ_BACKLOG.md` (что из ТЗ ещё не закрыто).
 
 ## 0. Страховка
@@ -101,7 +101,7 @@
 ## 6. Тесты и коммит
 
 `.venv/bin/python3 -m pytest tests/ -q`
-- Зелёные и правка обоснована → `git add src tests scripts docs samples CLAUDE.md && git commit`
+- Зелёные и правка обоснована → `git add src tests scripts docs samples docs/LESSONS.md && git commit`
   (+ `prompts`, когда папка появится: несуществующий путь роняет весь `git add`).
 - Красные или сомнительно → `git checkout -- . && git clean -fd src tests scripts docs prompts samples`,
   неудачу записать в бэклог. Дерево сломанным не оставлять.

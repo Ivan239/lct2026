@@ -158,7 +158,7 @@ def _declared_run_colours(slide):
                     # #EEEEEE (lt2) for text that renders BLACK, so two legible
                     # card slides came back "invisible". Scheme tokens resolve
                     # through the master's <p:clrMap>, and on top of that the
-                    # theme routinely lies about the deck's real look (CLAUDE.md).
+                    # theme routinely lies about the deck's real look (docs/LESSONS.md).
                     # Staying blind here is safer than being confidently wrong —
                     # the pixel scan still covers those slides.
                     continue

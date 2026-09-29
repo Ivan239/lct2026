@@ -8,7 +8,7 @@ safety clamp then made it worse: pinned at 88% of the slide height, it landed
 INSIDE the overflowing title and the two printed through each other.
 
 The width cap (cap_size_to_longest_word, iter18/25) only prevents mid-word
-breaks; nothing capped the block's HEIGHT. That is the same lesson CLAUDE.md
+breaks; nothing capped the block's HEIGHT. That is the same lesson docs/LESSONS.md
 records after the study deck's cover — change a size and recompute the layout —
 applied to the axis that fix did not cover.
 """

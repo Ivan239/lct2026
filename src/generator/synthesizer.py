@@ -124,7 +124,7 @@ def _recolor_for_canvas(palette, canvas_bg):
     render), not the XML one. The XML is not usable here: every slide of that
     template declares the same <a:schemeClr val="lt1"/>, which the theme maps to
     #FFFFFF, while the render shows four of them solid blue — the theme lies
-    about the deck's real look exactly as CLAUDE.md warns. Falls back to an
+    about the deck's real look exactly as docs/LESSONS.md warns. Falls back to an
     explicit srgb background when no measurement was supplied."""
     if canvas_bg is None:
         return palette
@@ -430,7 +430,7 @@ def _drop_orphaned_marker_column(slide, placed):
 
     The native fill path has handled this since iter18 (_reposition_bullet_icons
     deletes every icon past the last line); the clone path never got the same
-    pass. Same divergence CLAUDE.md records for the chrome blanking above.
+    pass. Same divergence docs/LESSONS.md records for the chrome blanking above.
 
     Deliberately narrow, because a picture on a canvas is usually decor worth
     keeping. A column is three or more pictures under an inch wide, matching in
@@ -616,7 +616,7 @@ def _title_fits_one_line(text, width_emu, size_pt, metrics, slack=0.1):
 
     Callers reserve space under the title, and the reserve carries a safety
     margin because the height estimate can under-count: the renderer wraps 2-4%
-    earlier than fontTools metrics predict (CLAUDE.md). That margin is only
+    earlier than fontTools metrics predict (docs/LESSONS.md). That margin is only
     earned when a wrap is actually possible. With no metrics we cannot tell, so
     we say no and the caller keeps its reserve."""
     if metrics is None or not text or not width_emu:
@@ -736,7 +736,7 @@ def synthesize_title(prs, theme, bounds_in, data, resolver=None, canvas_idx=None
     avail_h = max(int(Inches(1.0)), int(height * 0.94) - title_top - sub_reserve)
     # Both the fit and the height are measured against a budget shortened by
     # SINGLE_LINE_SAFETY, because a wrap prediction inside that margin cannot be
-    # trusted — CLAUDE.md records the renderer wrapping 2-4% earlier than
+    # trusted — docs/LESSONS.md records the renderer wrapping 2-4% earlier than
     # fontTools advances predict. The closing of the T-Zh study deck is exactly
     # that case: «Запустим пилот в вашем подразделении» measures 95.1% of its
     # budget, the estimate said one line, the renderer drew two, and the

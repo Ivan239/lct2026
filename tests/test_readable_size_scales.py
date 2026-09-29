@@ -6,7 +6,7 @@ T-Zh templates are authored at 10x5.62in, and a flat 11pt threshold reported
 NINE boxes of the pristine mono template as fine print — every one of them the
 deck's own 10pt body copy, at a size that reads perfectly on screen.
 
-Same class as the three false alarms CLAUDE.md already records: the harness
+Same class as the three false alarms docs/LESSONS.md already records: the harness
 judging a designer's layout by a ruler that does not apply to it.
 """
 

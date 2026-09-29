@@ -44,7 +44,7 @@ OAuth `ngw.devices.sberbank.ru:9443` таймаутит, `api.giga.chat:443` о�
    сколько бы их ни выжило.
 
 Возврат `(slide_idx, shape_id, size)` уходит в `_realign_icons_after_resize` —
-правило CLAUDE.md «любое пост-QA ужатие шрифта перекладывает иконки».
+правило docs/LESSONS.md «любое пост-QA ужатие шрифта перекладывает иконки».
 
 ## Проверка
 

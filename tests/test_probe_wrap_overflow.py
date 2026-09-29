@@ -1,7 +1,7 @@
 """The render-wrap counter must count what its name says.
 
 It exists to answer one question: how often does OUR text overflow *because* the
-renderer wraps a few percent earlier than fontTools predicts (CLAUDE.md). The
+renderer wraps a few percent earlier than fontTools predicts (docs/LESSONS.md). The
 first version answered a different one — "estimated text taller than frame" —
 and that is a commoner and mostly harmless thing. On the T-Zh universal deck it
 printed 15, of which 13 were single-line boxes missing their frame by 0.01in:

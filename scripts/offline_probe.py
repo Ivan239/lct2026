@@ -362,7 +362,7 @@ def boxes_over_at_render_wrap(deck_path, source_path=None, plan=None):
     earlier wrap is allowed for.
 
     enforce_text_fits measures against the full box width; the renderer wraps
-    2-4% sooner (CLAUDE.md), so a title measured at two lines is drawn on three
+    2-4% sooner (docs/LESSONS.md), so a title measured at two lines is drawn on three
     and spills out of its box. Measured on the T-Zh mono repeat deck: the
     heading needs 2.45in in a 1.88in box, and LibreOffice either autofits it
     smaller — silently undoing the size we computed — or lets it run over.
@@ -382,7 +382,7 @@ def boxes_over_at_render_wrap(deck_path, source_path=None, plan=None):
     line box. Those cannot be made better by any wrap margin — nothing wraps.
     So a box counts only when the safety-reduced width costs it a LINE that the
     full width did not, which is exactly what a margin in enforce_text_fits
-    would prevent. Same rule as 1.1 (CLAUDE.md): "estimate taller than frame" is
+    would prevent. Same rule as 1.1 (docs/LESSONS.md): "estimate taller than frame" is
     not a defect measure.
 
     Every paragraph is measured at ITS OWN size. Charging them all the box's
@@ -567,7 +567,7 @@ def title_ink_cut_by_its_box(deck_path, renders, plan=None):
     SYNTHESIZED slides only. On a native slide the title box is the designer's,
     and a designer's text exceeds its frame by intent — the first run of this
     flagged two untouched T-Zh study slides for exactly that, the same false
-    alarm CLAUDE.md records three times over.
+    alarm docs/LESSONS.md records three times over.
 
     Returns [(slide, clearance_in)] — reported, not scored.
     """

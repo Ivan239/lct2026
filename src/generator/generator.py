@@ -382,7 +382,7 @@ def _metrics_for_run(reference_run, resolver):
     """Metrics of the face the run is actually SET in, bold included.
 
     Cyrillic bold runs ~7% wider than the regular advances a family name
-    resolves to (CLAUDE.md), and every caller here — the one-line figure fit,
+    resolves to (docs/LESSONS.md), and every caller here — the one-line figure fit,
     the slot budgets, the title — measured its bold text with regular metrics.
     VK Tech's board printed «94» over «секунды»: the figure fitted «94 секунды»
     at 31pt, which is 101.2% of that box's line, so the renderer wrapped it and
@@ -739,7 +739,7 @@ def _align_left_edges(anchor_shape, *other_shapes, tolerance_emu=45720):
     0.72–2.49in, while the title starts at 0.68in. Aligned, the subtitle went
     under the photo on every VK Education deck (iter103–iter112, five times).
     A cap on the shift is not the answer — one was tried and reverted: a body
-    returned to its own column hung in an empty slide (CLAUDE.md). The rule is
+    returned to its own column hung in an empty slide (docs/LESSONS.md). The rule is
     about the cause: the box stays where it is when moving it would put it over
     a picture it does not touch now.
 
@@ -866,7 +866,7 @@ def _append_subtitle_paragraph(shape, subtitle, claimed_ids, resolver=None, slid
         _copy_run_format(reference, run)
     run.font.size = Pt(subtitle_pt)
     run.font.bold = False
-    # Claim it, or _clear_unclaimed_text blanks it later — the trap CLAUDE.md
+    # Claim it, or _clear_unclaimed_text blanks it later — the trap docs/LESSONS.md
     # records for the page numbers and the running topic.
     claimed_ids.add(box.shape_id)
 
@@ -1147,7 +1147,7 @@ def _harmonize_slot_sizes(prs, slide_indices):
     slot boxes are equal-size by construction (that is how they are detected),
     so the smallest size has already proved it fits every one of them. Only ever
     shrinks. Returns (slide_idx, shape_id, new_size_pt) so markers positioned
-    from the old size get re-laid-out, as CLAUDE.md requires of any post-QA
+    from the old size get re-laid-out, as docs/LESSONS.md requires of any post-QA
     resize."""
     changes = []
     for slide_idx in slide_indices:
@@ -1549,7 +1549,7 @@ def _fill_display_stat(shape, pair, claimed_ids, resolver=None, slide=None):
                                             line_spacing=spacing, margins_in=margins)
     # The gate is ONE LINE, not a height comparison. Our own model says the
     # designer's 82pt line needs 1.64in in its 1.38in box (spacing 1.2 counts
-    # 1.2 x size x percent, CLAUDE.md), i.e. the template "overflows" itself —
+    # 1.2 x size x percent, docs/LESSONS.md), i.e. the template "overflows" itself —
     # measuring the figure against the box would refuse the very layout the
     # template ships. What actually matters is that the figure stays a single
     # line, exactly as the designer set it.
@@ -2148,7 +2148,7 @@ def _image_slot_pictures(slide):
 
 # Skeleton frame and label colour on a native slide: the slide's own text colour
 # is usually inherited from its placeholder and cannot be copied (nor resolved —
-# CLAUDE.md), and an autoshape's default text is white. Mid-grey reads on the
+# docs/LESSONS.md), and an autoshape's default text is white. Mid-grey reads on the
 # light and the dark templates alike.
 _SKELETON_GREY = RGBColor(0x88, 0x88, 0x88)
 

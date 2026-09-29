@@ -2,7 +2,7 @@
 and the synthesis side (synthesizer.py) — split out so synthesis can clone a
 template slide as its canvas (plan 9.3) without a circular import.
 
-Everything here carries hard-won invariants; see CLAUDE.md before touching:
+Everything here carries hard-won invariants; see docs/LESSONS.md before touching:
 - clone_slide must NOT copy slideLayout/notesSlide relationships (single-owner
   reltypes; sharing a notesSlide across clones made PowerPoint offer to
   "repair" every generated deck);

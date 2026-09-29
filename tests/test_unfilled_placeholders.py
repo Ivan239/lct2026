@@ -3,7 +3,7 @@
 «Потеря 27% новичков обходится компании в X млн рублей ежегодно» went out on a
 real deck (iter147): the sentence asks the reader to imagine the number. Both
 content paths check it — two_phase and the legacy parser validate
-independently (CLAUDE.md) — and both check INSIDE the model call, so the cost
+independently (docs/LESSONS.md) — and both check INSIDE the model call, so the cost
 is one retry, never the slide.
 
 Measured over the corpus (iter148): one hit in 1715 texts of our 48 decks —

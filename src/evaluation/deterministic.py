@@ -188,7 +188,7 @@ def _text_band_emu(shape):
     A box is routinely taller than what it holds, and the difference is not a
     defect: survey-69 slide 6 runs a box to 7.83in on a 7.5in slide while its
     three paragraphs end at 5.11in. Measuring the box would call the designer's
-    own slide broken — the mistake CLAUDE.md records three times over.
+    own slide broken — the mistake docs/LESSONS.md records three times over.
 
     Only the anchor decides where the text sits inside the box: top-anchored
     text starts at the top inset, bottom-anchored ends at the bottom one,
@@ -295,7 +295,7 @@ def _table_cell_rects(shapes):
 def _text_collisions(content, metrics_for, slide=None):
     """Pairs of content blocks whose TEXT lands on top of other text.
 
-    Not box rectangles: CLAUDE.md records that those intersect by design (51
+    Not box rectangles: docs/LESSONS.md records that those intersect by design (51
     hits on the pristine 69-slide original). Text bands are a different measure —
     zero hits on four of the five real templates, and on the fifth only the
     footnotes the designer tucked under a heading on purpose.
@@ -837,7 +837,7 @@ def evaluate(pptx_path, slide_roles=None):
     paced = [p["chars"] + p["n_content"] * 40 for p in content_slides if p["chars"] > 0]
     scores["dop_pacing"] = _evenness_score(paced or char_counts, "объёма контентных слайдов")
     # dop_no_placeholders — see placeholder_hits. Categorical: any slide with
-    # leftover template text caps the criterion at 1 (CLAUDE.md: a categorical
+    # leftover template text caps the criterion at 1 (docs/LESSONS.md: a categorical
     # defect must not be diluted by the slide count).
     hit_slides = [(i + 1, placeholder_hits(sl)) for i, sl in enumerate(slides)]
     hit_slides = [(num, hits) for num, hits in hit_slides if hits]

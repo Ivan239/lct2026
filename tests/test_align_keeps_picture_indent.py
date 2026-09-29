@@ -6,7 +6,7 @@ the subtitle to the title and printed it under the photo — on every VK
 Education deck from iter103 to iter112, five of five.
 
 A cap on the shift was tried long ago and reverted (a body returned to its own
-column hung in an empty slide — CLAUDE.md), so the rule is about the cause: an
+column hung in an empty slide — docs/LESSONS.md), so the rule is about the cause: an
 indent that clears a picture is design. Without such a picture the alignment
 works as before — the second synthetic case pins that.
 """

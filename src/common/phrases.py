@@ -108,7 +108,7 @@ def unfilled_placeholders(*texts):
     """The placeholder variables left in these texts, if any.
 
     Both content paths must ask: two_phase and the legacy parser validate
-    independently (CLAUDE.md), and a deck that says «в X млн рублей» is worse
+    independently (docs/LESSONS.md), and a deck that says «в X млн рублей» is worse
     than a deck one retry slower."""
     found = []
     for text in texts:

@@ -22,7 +22,7 @@ import urllib3
 from dotenv import load_dotenv
 
 load_dotenv()
-# verify_ssl=False is deliberate on this network path (see CLAUDE.md) — the
+# verify_ssl=False is deliberate on this network path (see docs/LESSONS.md) — the
 # per-request warning would drown the actual pass/fail output.
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 

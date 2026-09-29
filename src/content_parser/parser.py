@@ -20,7 +20,7 @@ PAIR_FIELD_BY_TYPE = {"stats_kpi": "stats"}
 
 def _reject_unfilled_placeholders(block):
     """Same guard as two_phase._reject_unfilled_placeholders — the two content
-    paths validate independently (CLAUDE.md), and «в X млн рублей» is exactly
+    paths validate independently (docs/LESSONS.md), and «в X млн рублей» is exactly
     the kind of thing one path would keep letting through."""
     texts = [v for v in block.values() if isinstance(v, str)]
     for value in block.values():
