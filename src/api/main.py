@@ -296,6 +296,8 @@ class GenerateRequest(BaseModel):
 
 @app.get("/api/models")
 def list_available_models():
+    if client is None:
+        return {"models": []}  # модель не настроена — нечего предлагать
     return {"models": [DEFAULT_MODEL] if DEFAULT_MODEL else AVAILABLE_MODELS}
 
 
