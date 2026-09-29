@@ -20,7 +20,15 @@ def _try_repair(candidate):
         return None
 
 
+# Гибридные reasoning-модели (Qwen3, открытые веса до 35B) кладут рассуждение в
+# <think>…</think> перед ответом. В рассуждении бывают скобки и черновики JSON,
+# а поиск ниже берёт ПЕРВУЮ скобку — черновик выдавался бы за ответ. Незакрытый
+# <think> (ответ обрезан по max_tokens) — ответа нет вовсе.
+_THINK_RE = re.compile(r"<think>.*?(</think>|$)", re.DOTALL | re.IGNORECASE)
+
+
 def extract_json(text):
+    text = _THINK_RE.sub("", text)
     cleaned = re.sub(r"^```(?:json)?|```$", "", text.strip(), flags=re.MULTILINE).strip()
     try:
         return json.loads(cleaned)
