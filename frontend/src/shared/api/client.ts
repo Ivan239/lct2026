@@ -1,6 +1,9 @@
 import type { BalanceEntry, GenerateResponse, TemplateSummary } from './types'
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8000'
+// В сборке (docker compose) фронт и API за одним nginx: путь относительный.
+// В dev-режиме Vite бэкенд поднят отдельно на 8000.
+const API_BASE_URL =
+  import.meta.env.VITE_API_BASE_URL ?? (import.meta.env.DEV ? 'http://localhost:8000' : '')
 
 export function resolveUrl(path: string): string {
   return path.startsWith('http') ? path : `${API_BASE_URL}${path}`

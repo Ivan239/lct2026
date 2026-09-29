@@ -6,10 +6,14 @@ loop a ready (gen_client, model_name) pair, or raises BackendUnavailable so the
 loop can QUEUE that model and move on — which is exactly RTX's state right now
 (box offline), not an error.
 
-Env for an OpenAI-compatible backend (e.g. RTX):
-    RTX_BASE_URL   e.g. http://192.168.31.50:8000/v1
-    RTX_MODEL      model name the server serves (default "rtx")
-    RTX_API_KEY    optional
+Env for the open-weights backend (the one the brief requires — Apache 2.0 / MIT,
+up to 35B — served by vLLM, Ollama, TGI or any OpenAI-compatible provider):
+    LLM_BASE_URL   e.g. https://api.provider.tld/v1 or http://localhost:8000/v1
+    LLM_MODEL      model name the server serves, e.g. Qwen/Qwen2.5-32B-Instruct
+    LLM_API_KEY    optional
+
+RTX_* are still read as aliases: that was the local GPU box's name during
+development.
 """
 
 import os
@@ -49,15 +53,33 @@ def _reachable(url, timeout=4):
         return False
 
 
-def _rtx_config():
-    base = os.environ.get("RTX_BASE_URL")
+def open_weights_config():
+    """The configured open-weights endpoint, or None when it is not set up."""
+    base = os.environ.get("LLM_BASE_URL") or os.environ.get("RTX_BASE_URL")
     if not base:
         return None
     return {
         "base_url": base,
-        "model": os.environ.get("RTX_MODEL", "rtx"),
-        "api_key": os.environ.get("RTX_API_KEY"),
+        "model": os.environ.get("LLM_MODEL") or os.environ.get("RTX_MODEL", "open"),
+        "api_key": os.environ.get("LLM_API_KEY") or os.environ.get("RTX_API_KEY"),
     }
+
+
+def open_weights_client():
+    """(client, model_name) for the configured open-weights endpoint, or None.
+
+    The default provider of the service: the brief allows only open weights up
+    to 35B under Apache 2.0 / MIT. GigaChat stays reachable as a development
+    fallback and is never used when this endpoint is configured."""
+    cfg = open_weights_config()
+    if not cfg:
+        return None
+    client = OpenAICompatClient(cfg["base_url"], api_key=cfg["api_key"],
+                                default_model=cfg["model"], verify_ssl=False)
+    return client, cfg["model"]
+
+
+_rtx_config = open_weights_config  # исторический псевдоним
 
 
 def resolve(model):

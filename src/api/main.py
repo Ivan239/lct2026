@@ -66,7 +66,26 @@ PRESET_NAMES = {
     "template_b_startup": "Стартап (светлый + фиолетовый)",
 }
 
-client = GigaChatClient(verify_ssl=False)
+def _make_client():
+    """The service runs on the open-weights endpoint the brief requires
+    (LLM_BASE_URL / LLM_MODEL). GigaChat remains only as a development fallback
+    when no such endpoint is configured — see docs/MODELS.md."""
+    from llm_clients.backends import open_weights_client
+
+    configured = open_weights_client()
+    if configured is not None:
+        client_, model_ = configured
+        print(f"[api] генератор: {model_} через {os.environ.get('LLM_BASE_URL')}", flush=True)
+        return client_, model_
+    print("[api] LLM_BASE_URL не задан — используется запасной провайдер разработки",
+          flush=True)
+    return GigaChatClient(verify_ssl=False), None
+
+
+client, DEFAULT_MODEL = _make_client()
+# Every call that does not name a model uses the configured open-weights one;
+# without it we fall back to the development chain.
+DEFAULT_MODELS = [DEFAULT_MODEL] if DEFAULT_MODEL else TEXT_MODELS
 app = FastAPI(title="SlideGen API")
 app.add_middleware(
     CORSMiddleware,
@@ -159,7 +178,7 @@ def _process_template(template_id, pptx_path, model=None):
     template_struct = extract_template(pptx_path)
     _set_progress("Рендерим слайды шаблона")
     png_paths = render_pptx_to_pngs(pptx_path, RENDERED_DIR)
-    text_models = [model] if model else TEXT_MODELS
+    text_models = [model] if model else DEFAULT_MODELS
     archetype_map = build_archetype_map(
         client, template_struct, rendered_png_paths=png_paths, text_models=text_models,
         fingerprint_cache=FingerprintCache(FINGERPRINT_CACHE_PATH),
@@ -260,7 +279,7 @@ class GenerateRequest(BaseModel):
 
 @app.get("/api/models")
 def list_available_models():
-    return {"models": AVAILABLE_MODELS}
+    return {"models": [DEFAULT_MODEL] if DEFAULT_MODEL else AVAILABLE_MODELS}
 
 
 @app.get("/api/balance")
@@ -443,7 +462,7 @@ def _plan_two_phase(template_id, brief, model=None, slides=None):
     text sized to the chosen slide's real capacity. Returns (plan, skipped), or
     (None, None) to signal the caller to fall back to the legacy flow — the new
     path must never make the product less available than the old one was."""
-    models = [model] if model else TEXT_MODELS
+    models = [model] if model else DEFAULT_MODELS
     try:
         spec = _build_spec(template_id)
         # Template design brief (plan 9.4) — cached at upload, advisory only.
@@ -490,7 +509,7 @@ def _plan_two_phase(template_id, brief, model=None, slides=None):
 def _plan_legacy(brief, archetype_map, template_path, model=None):
     """Pre-slot-spec flow: single-shot brief parsing, then post-hoc capacity
     resize. Kept as the fallback when any stage of the two-phase path fails."""
-    models = [model] if model else TEXT_MODELS
+    models = [model] if model else DEFAULT_MODELS
     try:
         content_blocks = parse_brief(client, brief, models=models)
     except Exception as e:

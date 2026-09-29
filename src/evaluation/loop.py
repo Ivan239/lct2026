@@ -243,13 +243,13 @@ def _gen_models(model):
 
 
 def generate_deck(client, model, source_pptx, spec, brief, style_preamble, out_pptx, profile=None,
-                  slides=None):
+                  slides=None, variant=None):
     """Two-phase generation under one model (with a validation-failure safety net,
     see _gen_models). Returns (plan, skipped) — plan is [(block, slide_idx)], its
     order is the final slide order."""
     models = _gen_models(model)
     outline = generate_outline(client, brief, spec, models=models, style_preamble=style_preamble,
-                               slides=slides)
+                               slides=slides, variant=variant)
     assignments, skipped_items = plan_from_outline(outline, spec)
     plan = []
     # Blocks are generated one call at a time and can't see each other — carry the

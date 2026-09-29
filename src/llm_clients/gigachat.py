@@ -6,6 +6,7 @@ import uuid
 
 import certifi
 import requests
+from common.tls import allow_unverified_tls
 
 OAUTH_URL = "https://ngw.devices.sberbank.ru:9443/api/v2/oauth"
 # api.giga.chat hosts the newer model line (GigaChat-2*) — the older
@@ -64,6 +65,10 @@ class GigaChatClient:
         # the same Russian root the OS already does; pass True/False/a path
         # explicitly to override.
         self.verify_ssl = verify_ssl if verify_ssl is not None else _ca_bundle_path()
+        if not self.verify_ssl:
+            # Оба хоста: OAuth — отдельный сервис, ходим туда тем же verify.
+            allow_unverified_tls(API_BASE)
+            allow_unverified_tls(OAUTH_URL)
         self._token = None
         self._token_expires_at = 0
 

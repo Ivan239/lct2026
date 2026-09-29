@@ -1,0 +1,11 @@
+.git
+.venv
+output
+node_modules
+frontend/node_modules
+frontend/dist
+docs/improvement_runs
+**/__pycache__
+*.pyc
+.env
+.DS_Store

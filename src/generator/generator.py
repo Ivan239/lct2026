@@ -51,6 +51,7 @@ from generator.slide_kit import (
     slide_width as _slide_width,
     is_boring_placeholder as _is_boring_placeholder,
     is_chrome_shape,
+    placed_shapes,
     text_shapes as _text_shapes,
 )
 
@@ -619,8 +620,16 @@ def _clear_unclaimed_text(slide, claimed_ids, slide_height=None):
     could not see those slots, so their badges were spared as page numbers and
     renumbered. Blanking had been masking that defect. It is safe now only
     because iter30 made such rows detectable — so their badges are claimed and
-    named — and that is verified by measurement, not assumed."""
-    for shape in _text_shapes(slide):
+    named — and that is verified by measurement, not assumed.
+
+    Groups are opened (iter152): they were not, and VK Education's four-step
+    slide shipped «Описание первого преимущества или шага (в три строки и
+    больше)» four times over — the designer's sample text, inside one group of
+    eight shapes, under our own heading. Chrome is judged on the PLACED box,
+    because a group member reports its position in the group's own space."""
+    for shape in placed_shapes(slide.shapes):
+        if not shape.has_text_frame or not shape.text_frame.text.strip():
+            continue
         if shape.shape_id in claimed_ids:
             continue
         if slide_height is not None and _is_managed_chrome(shape, slide_height):

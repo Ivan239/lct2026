@@ -9,3 +9,5 @@ output/
 node_modules/
 frontend/dist/
 .loop_state.json
+.claude/
+output/submission/

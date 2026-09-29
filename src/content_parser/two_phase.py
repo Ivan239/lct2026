@@ -133,7 +133,8 @@ def deck_size_bounds(slides=None):
     return DECK_MIN_SLIDES, DECK_MAX_SLIDES
 
 
-def generate_outline(client, brief, spec, models=TEXT_MODELS, style_preamble="", slides=None):
+def generate_outline(client, brief, spec, models=TEXT_MODELS, style_preamble="", slides=None,
+                     variant=None):
     """Outline of `slides` blocks when given (a content package's `slides`),
     DECK_MIN_SLIDES..DECK_MAX_SLIDES otherwise.
 
@@ -155,6 +156,11 @@ def generate_outline(client, brief, spec, models=TEXT_MODELS, style_preamble="",
         .replace("__RANGE__", f"РОВНО {low}" if low == high else f"{low}-{high}")
         .replace("__BRIEF__", brief)
     )
+    # Вариант вёрстки меняет ПЛАН, а не вёрстку: добавка лежит отдельным файлом
+    # промпта, по файлу на вариант (content_parser/variants.py).
+    if variant:
+        from content_parser.variants import variant_preamble
+        prompt += variant_preamble(variant)
 
     def make_call(text):
         def call(model):

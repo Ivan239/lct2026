@@ -15,6 +15,7 @@ If a backend later needs vision, add inline base64 image_url parts here.
 import os
 
 import requests
+from common.tls import allow_unverified_tls
 
 CHAT_TIMEOUT = (10, 300)  # local models can be slow to first token
 
@@ -25,6 +26,8 @@ class OpenAICompatClient:
         self.api_key = api_key or os.environ.get("OPENAI_COMPAT_API_KEY", "")
         self.default_model = default_model
         self.verify_ssl = verify_ssl
+        if not verify_ssl:
+            allow_unverified_tls(self.base_url)
 
     def _headers(self):
         h = {"Content-Type": "application/json", "Accept": "application/json"}
